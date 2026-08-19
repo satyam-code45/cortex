@@ -1,0 +1,15 @@
+# secrets
+.env
+.gmail-token.json
+
+# build artifacts
+bin/
+backend/bin/
+
+# frontend
+node_modules/
+.next/
+frontend/out/
+
+# misc
+*.log
