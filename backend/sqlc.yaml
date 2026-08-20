@@ -8,9 +8,9 @@ sql:
         package: "store"
         out: "internal/store"
         sql_package: "pgx/v5"
-        # Emit a Querier interface so handlers and workers depend on the
-        # interface rather than *Queries — that seam is what makes them
-        # testable and what lets a pgx.Tx be swapped in via WithTx.
+        # Emit a Querier interface so shared run-lifecycle helpers accept
+        # either the pool-backed *Queries or a transaction-scoped one; Day 2's
+        # River worker reuses the same helpers as the HTTP handler.
         emit_interface: true
         emit_json_tags: true
         emit_empty_slices: true

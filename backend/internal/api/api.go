@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"mime"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -59,6 +60,21 @@ func NewRouter(deps Deps) http.Handler {
 		r.Post("/chat", s.handleChat)
 	})
 	return r
+}
+
+// hasJSONContentType reports whether the request declares a JSON body. The
+// header may carry parameters (`application/json; charset=utf-8`), so only the
+// media type is compared.
+func hasJSONContentType(r *http.Request) bool {
+	contentType := r.Header.Get("Content-Type")
+	if contentType == "" {
+		return false
+	}
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return false
+	}
+	return mediaType == "application/json"
 }
 
 // errorResponse is the body returned for every non-2xx response.

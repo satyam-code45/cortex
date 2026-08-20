@@ -218,6 +218,9 @@ func requireGoose(t *testing.T) (goosePath, dsn string) {
 	}
 	goosePath, err := exec.LookPath("goose")
 	if err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatal("goose CLI not on PATH; TEST-1.4 cannot run in CI")
+		}
 		t.Skip("goose CLI not on PATH; skipping migration test")
 	}
 	return goosePath, dsn
@@ -255,14 +258,14 @@ func createScratchDatabase(t *testing.T, dsn string) string {
 	t.Helper()
 	u, err := url.Parse(dsn)
 	if err != nil {
-		t.Skipf("TEST_DATABASE_URL is not a URL (%v); skipping migration test", err)
+		t.Fatalf("TEST_DATABASE_URL is not a valid URL: %v", err)
 	}
 
 	name := fmt.Sprintf("cortex_mig_%d_%d", time.Now().UnixNano()%1e9, rand.Intn(1000))
 	admin := connect(t, dsn)
 	ctx := context.Background()
 	if _, err := admin.Exec(ctx, fmt.Sprintf(`CREATE DATABASE %q`, name)); err != nil {
-		t.Skipf("cannot create scratch database %s (%v); skipping migration test", name, err)
+		t.Fatalf("create scratch database %s: %v", name, err)
 	}
 	t.Cleanup(func() {
 		conn := connect(t, dsn)
@@ -280,7 +283,9 @@ func connect(t *testing.T, dsn string) *pgx.Conn {
 	t.Helper()
 	conn, err := pgx.Connect(context.Background(), dsn)
 	if err != nil {
-		t.Fatalf("connect to %s: %v", dsn, err)
+		// Never print the DSN itself — it carries the password, and this text
+		// ends up in CI build logs.
+		t.Fatalf("connect to test database: %v", err)
 	}
 	t.Cleanup(func() {
 		_ = conn.Close(context.Background())

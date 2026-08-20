@@ -37,11 +37,18 @@ func (q *Queries) CreateConversation(ctx context.Context, arg CreateConversation
 
 const getConversation = `-- name: GetConversation :one
 SELECT id, user_id, title, created_at, updated_at FROM conversations
-WHERE id = $1
+WHERE id = $1 AND user_id = $2
 `
 
-func (q *Queries) GetConversation(ctx context.Context, id uuid.UUID) (Conversation, error) {
-	row := q.db.QueryRow(ctx, getConversation, id)
+type GetConversationParams struct {
+	ID     uuid.UUID `json:"id"`
+	UserID uuid.UUID `json:"user_id"`
+}
+
+// Scoped by user_id on purpose: keeping the ownership predicate in the query
+// means a future handler cannot forget the Go-side check and open an IDOR.
+func (q *Queries) GetConversation(ctx context.Context, arg GetConversationParams) (Conversation, error) {
+	row := q.db.QueryRow(ctx, getConversation, arg.ID, arg.UserID)
 	var i Conversation
 	err := row.Scan(
 		&i.ID,

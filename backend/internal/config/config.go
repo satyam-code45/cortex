@@ -11,6 +11,11 @@ import (
 
 // Defaults applied when the corresponding environment variable is unset.
 const (
+	// DefaultHost binds to loopback only. Until auth exists, every request is
+	// the dev user and every chat call spends real money, so the server must
+	// not be reachable from the network by default. Set HOST=0.0.0.0 to expose
+	// it deliberately.
+	DefaultHost            = "127.0.0.1"
 	DefaultPort            = "8080"
 	DefaultLLMModel        = "gpt-4o"
 	DefaultLLMUtilityModel = "gpt-4o-mini"
@@ -22,6 +27,8 @@ const (
 type Config struct {
 	// DatabaseURL is the Postgres connection string (required).
 	DatabaseURL string
+	// Host is the interface the HTTP server binds to.
+	Host string
 	// Port is the TCP port the HTTP server listens on.
 	Port string
 
@@ -44,6 +51,7 @@ type Config struct {
 func Load() (*Config, error) {
 	cfg := &Config{
 		DatabaseURL:     os.Getenv("DATABASE_URL"),
+		Host:            envOr("HOST", DefaultHost),
 		Port:            envOr("PORT", DefaultPort),
 		OpenAIAPIKey:    os.Getenv("OPENAI_API_KEY"),
 		OpenAIBaseURL:   os.Getenv("OPENAI_BASE_URL"),

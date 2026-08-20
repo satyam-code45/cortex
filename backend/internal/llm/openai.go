@@ -3,7 +3,10 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
+	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -13,6 +16,10 @@ import (
 // DefaultOpenAIBaseURL is the public OpenAI API endpoint, used when
 // OpenAIConfig.BaseURL is empty.
 const DefaultOpenAIBaseURL = "https://api.openai.com/v1/"
+
+// requestTimeout is the transport-level backstop for a single provider call.
+// It is deliberately looser than any per-request context deadline.
+const requestTimeout = 2 * time.Minute
 
 // OpenAIConfig configures an OpenAI-backed Provider.
 type OpenAIConfig struct {
@@ -47,9 +54,14 @@ func NewOpenAI(cfg OpenAIConfig) *OpenAI {
 	if baseURL == "" {
 		baseURL = DefaultOpenAIBaseURL
 	}
+	// The SDK defaults to http.DefaultClient, which has no timeout at all — a
+	// hung connection would block forever for any caller that forgets to set a
+	// deadline (Embed from an indexing job, say). Own the client so every call
+	// has a backstop regardless of caller discipline.
 	opts := []option.RequestOption{
 		option.WithAPIKey(cfg.APIKey),
 		option.WithBaseURL(baseURL),
+		option.WithHTTPClient(&http.Client{Timeout: requestTimeout}),
 	}
 	return &OpenAI{client: openai.NewClient(opts...), cfg: cfg}
 }
@@ -225,4 +237,44 @@ func (o *OpenAI) modelFor(req Request) string {
 		return req.Model
 	}
 	return o.cfg.DefaultModel
+}
+
+// SafeErrorMessage renders err as a short, classified reason that is safe to
+// persist and to show to operators.
+//
+// The raw error must never be stored: openai-go's *openai.Error.Error()
+// formats the full request URL and the verbatim upstream response body. A 401
+// body contains the partially-masked API key, and a proxy/Azure-style
+// OPENAI_BASE_URL can carry credentials in its query string — both would
+// otherwise land in agent_runs.error and in the run_events transcript, which
+// the trace panel is designed to render. Log the original error instead.
+func SafeErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	var apiErr *openai.Error
+	if errors.As(err, &apiErr) {
+		msg := fmt.Sprintf("llm provider returned HTTP %d", apiErr.StatusCode)
+		// Type and Code are short enumerated identifiers (e.g.
+		// "invalid_request_error" / "rate_limit_exceeded"), not free text.
+		if apiErr.Type != "" {
+			msg += ", type=" + apiErr.Type
+		}
+		if apiErr.Code != "" {
+			msg += ", code=" + apiErr.Code
+		}
+		return msg
+	}
+
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "llm request timed out"
+	case errors.Is(err, context.Canceled):
+		return "llm request canceled"
+	default:
+		// Anything else (DNS, TLS, connection errors) can embed the endpoint
+		// URL, so report only the category.
+		return "llm request failed"
+	}
 }

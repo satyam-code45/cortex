@@ -3,9 +3,12 @@ package api_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 
@@ -94,6 +97,8 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	if dsn == "" {
 		t.Skip("TEST_DATABASE_URL not set; skipping database-backed test")
 	}
+	assertNotDevDatabase(t, dsn)
+
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
@@ -120,4 +125,42 @@ func queryInt(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) int {
 		t.Fatalf("query %q: %v", sql, err)
 	}
 	return n
+}
+
+// assertNotDevDatabase refuses to run against the development database.
+//
+// testPool truncates users, which cascades to every table Day 1 writes. The
+// natural way to "fix" a missing test database is to repoint
+// TEST_DATABASE_URL at DATABASE_URL, and that would silently wipe real data on
+// the next test run — so make it a hard failure instead of a comment in
+// .env.example.
+func assertNotDevDatabase(t *testing.T, dsn string) {
+	t.Helper()
+
+	name, err := databaseName(dsn)
+	if err != nil {
+		t.Fatalf("parse TEST_DATABASE_URL: %v", err)
+	}
+	if devDSN := os.Getenv("DATABASE_URL"); devDSN != "" {
+		if devName, err := databaseName(devDSN); err == nil && devName == name {
+			t.Fatalf("TEST_DATABASE_URL points at the development database %q; tests truncate it", name)
+		}
+	}
+	if !strings.HasSuffix(name, "_test") {
+		t.Fatalf("TEST_DATABASE_URL database %q must end in _test; tests truncate it", name)
+	}
+}
+
+// databaseName extracts the database name from a Postgres DSN. The error never
+// includes the DSN itself, which carries the password.
+func databaseName(dsn string) (string, error) {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return "", fmt.Errorf("invalid DSN: %w", err)
+	}
+	name := strings.TrimPrefix(u.Path, "/")
+	if name == "" {
+		return "", fmt.Errorf("DSN has no database name")
+	}
+	return name, nil
 }

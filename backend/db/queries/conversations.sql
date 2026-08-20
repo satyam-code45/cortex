@@ -4,8 +4,10 @@ VALUES ($1, $2)
 RETURNING *;
 
 -- name: GetConversation :one
+-- Scoped by user_id on purpose: keeping the ownership predicate in the query
+-- means a future handler cannot forget the Go-side check and open an IDOR.
 SELECT * FROM conversations
-WHERE id = $1;
+WHERE id = $1 AND user_id = $2;
 
 -- name: ListConversationsByUser :many
 SELECT * FROM conversations

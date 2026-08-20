@@ -34,6 +34,15 @@ const (
 	// maxTitleRunes caps the conversation title derived from the first message.
 	maxTitleRunes = 80
 
+	// maxRequestBytes caps the request body. Without it a single large POST is
+	// read entirely into memory before validation can reject it.
+	maxRequestBytes = 64 << 10
+
+	// maxMessageRunes caps a single user message. The stored message is
+	// replayed to the model on every later turn of the conversation, so an
+	// oversized one is not a one-off cost — it is charged again on each turn.
+	maxMessageRunes = 8000
+
 	// llmPurposeChat labels llm_calls rows made by this handler.
 	llmPurposeChat = "chat"
 )
@@ -65,14 +74,34 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	logger := s.deps.Logger
 	ctx := r.Context()
 
+	// Requiring a JSON content type keeps this endpoint out of the set of
+	// CORS-"simple" requests, so a browser must preflight it. Without the
+	// check, any page the user visits could POST here cross-origin with no
+	// preflight and spend real money on LLM calls.
+	if !hasJSONContentType(r) {
+		writeError(w, logger, http.StatusUnsupportedMediaType, "content-type must be application/json")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBytes)
 	var req chatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeError(w, logger, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
 		writeError(w, logger, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	message := strings.TrimSpace(req.Message)
 	if message == "" {
 		writeError(w, logger, http.StatusBadRequest, "message is required")
+		return
+	}
+	if utf8.RuneCountInString(message) > maxMessageRunes {
+		writeError(w, logger, http.StatusBadRequest,
+			fmt.Sprintf("message must be at most %d characters", maxMessageRunes))
 		return
 	}
 
@@ -115,8 +144,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	defer persistCancel()
 
 	if llmErr != nil {
+		// The full error goes to the log; only the classified reason is stored.
 		logger.Error("chat: llm call failed", "run_id", started.runID, "error", llmErr)
-		if err := s.failRun(persistCtx, started, llmErr, latency); err != nil {
+		if err := s.failRun(persistCtx, started, llm.SafeErrorMessage(llmErr), latency); err != nil {
 			logger.Error("chat: failed to record failed run", "run_id", started.runID, "error", err)
 		}
 		writeError(w, logger, http.StatusBadGateway, "llm request failed")
@@ -125,6 +155,12 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.completeRun(persistCtx, started, resp, latency); err != nil {
 		logger.Error("chat: failed to record completed run", "run_id", started.runID, "error", err)
+		// The run is still 'running' and the write-back just failed, so drive
+		// it to a terminal state. Without this the row has no finished_at and
+		// is indistinguishable from an in-flight run forever.
+		if failErr := s.failRun(persistCtx, started, "failed to persist answer", latency); failErr != nil {
+			logger.Error("chat: failed to record persist failure", "run_id", started.runID, "error", failErr)
+		}
 		writeError(w, logger, http.StatusInternalServerError, "failed to persist answer")
 		return
 	}
@@ -143,8 +179,6 @@ type startedRun struct {
 	runID          uuid.UUID
 	// history is the conversation so far, including the message just stored.
 	history []llm.Message
-	// nextSeq is the seq to use for the next run_events row.
-	nextSeq int32
 }
 
 // conversationNotFoundError reports a conversation_id that does not exist or
@@ -165,7 +199,10 @@ func (s *Server) startRun(ctx context.Context, conversationID uuid.UUID, message
 	if err != nil {
 		return startedRun{}, fmt.Errorf("begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck // no-op once the tx is committed
+	// Roll back on a context that cannot already be cancelled: pgx kills the
+	// connection outright when it cannot send the ROLLBACK, forcing a fresh
+	// handshake instead of returning it to the pool.
+	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // no-op once the tx is committed
 
 	q := store.New(tx)
 
@@ -185,16 +222,15 @@ func (s *Server) startRun(ctx context.Context, conversationID uuid.UUID, message
 			return startedRun{}, fmt.Errorf("create conversation: %w", err)
 		}
 	} else {
-		conversation, err = q.GetConversation(ctx, conversationID)
+		conversation, err = q.GetConversation(ctx, store.GetConversationParams{
+			ID:     conversationID,
+			UserID: user.ID,
+		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return startedRun{}, &conversationNotFoundError{id: conversationID}
 		}
 		if err != nil {
 			return startedRun{}, fmt.Errorf("get conversation: %w", err)
-		}
-		// Do not leak another user's conversation, even with one dev user today.
-		if conversation.UserID != user.ID {
-			return startedRun{}, &conversationNotFoundError{id: conversationID}
 		}
 	}
 
@@ -220,9 +256,8 @@ func (s *Server) startRun(ctx context.Context, conversationID uuid.UUID, message
 	started := startedRun{
 		conversationID: conversation.ID,
 		runID:          run.ID,
-		nextSeq:        1,
 	}
-	if err := s.appendEvent(ctx, q, &started, "run_started", map[string]any{
+	if err := appendEvent(ctx, q, run.ID, "run_started", map[string]any{
 		"conversation_id": conversation.ID,
 		"query":           message,
 		"model":           model,
@@ -257,7 +292,10 @@ func (s *Server) completeRun(ctx context.Context, started startedRun, resp llm.R
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck // no-op once the tx is committed
+	// Roll back on a context that cannot already be cancelled: pgx kills the
+	// connection outright when it cannot send the ROLLBACK, forcing a fresh
+	// handshake instead of returning it to the pool.
+	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // no-op once the tx is committed
 
 	q := store.New(tx)
 	latencyMs := int32(latency.Milliseconds())
@@ -283,16 +321,22 @@ func (s *Server) completeRun(ctx context.Context, started startedRun, resp llm.R
 		return fmt.Errorf("insert llm call: %w", err)
 	}
 
-	if err := s.appendEvent(ctx, q, &started, "llm_call_completed", map[string]any{
-		"purpose":       llmPurposeChat,
-		"model":         s.deps.Model,
+	if err := appendEvent(ctx, q, started.runID, "llm_call_completed", map[string]any{
+		"purpose": llmPurposeChat,
+		"model":   s.deps.Model,
+		// The transcript has to carry the input that produced the answer, not
+		// just the output — the system prompt is a compile-time constant that
+		// is stored nowhere else, so a trace replayed after it changes would
+		// otherwise misrepresent the run.
+		"system_prompt": chatSystemPrompt,
+		"message_count": len(started.history),
 		"input_tokens":  resp.InputTokens,
 		"output_tokens": resp.OutputTokens,
 		"latency_ms":    latencyMs,
 	}); err != nil {
 		return err
 	}
-	if err := s.appendEvent(ctx, q, &started, "run_completed", map[string]any{
+	if err := appendEvent(ctx, q, started.runID, "run_completed", map[string]any{
 		"answer":     resp.Text,
 		"latency_ms": latencyMs,
 	}); err != nil {
@@ -319,18 +363,24 @@ func (s *Server) completeRun(ctx context.Context, started startedRun, resp llm.R
 	return nil
 }
 
-// failRun records a failed run and its event. The detailed error is stored for
-// debugging; the client only sees a generic message.
-func (s *Server) failRun(ctx context.Context, started startedRun, cause error, latency time.Duration) error {
+// failRun records a failed run and its event.
+//
+// reason must already be safe to persist — see llm.SafeErrorMessage. Raw
+// provider errors embed the request URL and the upstream response body, and
+// this value is written both to agent_runs.error and into the run_events
+// transcript that the trace panel renders.
+func (s *Server) failRun(ctx context.Context, started startedRun, reason string, latency time.Duration) error {
 	tx, err := s.deps.DB.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck // no-op once the tx is committed
+	// Roll back on a context that cannot already be cancelled: pgx kills the
+	// connection outright when it cannot send the ROLLBACK, forcing a fresh
+	// handshake instead of returning it to the pool.
+	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // no-op once the tx is committed
 
 	q := store.New(tx)
 	latencyMs := int32(latency.Milliseconds())
-	reason := cause.Error()
 
 	if _, err := q.FailAgentRun(ctx, store.FailAgentRunParams{
 		ID:        started.runID,
@@ -340,7 +390,7 @@ func (s *Server) failRun(ctx context.Context, started startedRun, cause error, l
 		return fmt.Errorf("fail agent run: %w", err)
 	}
 
-	if err := s.appendEvent(ctx, q, &started, "run_failed", map[string]any{
+	if err := appendEvent(ctx, q, started.runID, "run_failed", map[string]any{
 		"error":      reason,
 		"latency_ms": latencyMs,
 	}); err != nil {
@@ -353,23 +403,26 @@ func (s *Server) failRun(ctx context.Context, started startedRun, cause error, l
 	return nil
 }
 
-// appendEvent writes the next run_events row and advances the sequence. Events
-// are the append-only transcript of a run: gap-free seq per run is what lets
-// the trace be replayed in order.
-func (s *Server) appendEvent(ctx context.Context, q *store.Queries, started *startedRun, eventType string, payload map[string]any) error {
+// appendEvent writes the next run_events row. Events are the append-only
+// transcript of a run: gap-free seq per run is what lets the trace be replayed
+// in order.
+//
+// The sequence number is derived inside the INSERT rather than carried in Go,
+// so a resumed or retried run continues the transcript instead of colliding
+// with the unique (agent_run_id, seq) constraint. q must be transaction-scoped
+// for that to be race-free.
+func appendEvent(ctx context.Context, q store.Querier, runID uuid.UUID, eventType string, payload map[string]any) error {
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal %s payload: %w", eventType, err)
 	}
 	if _, err := q.InsertRunEvent(ctx, store.InsertRunEventParams{
-		AgentRunID: started.runID,
-		Seq:        started.nextSeq,
+		AgentRunID: runID,
 		Type:       eventType,
 		Payload:    encoded,
 	}); err != nil {
 		return fmt.Errorf("insert %s event: %w", eventType, err)
 	}
-	started.nextSeq++
 	return nil
 }
 

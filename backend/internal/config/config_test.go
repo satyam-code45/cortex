@@ -10,6 +10,7 @@ import (
 // envKeys is every variable internal/config reads. Each test case starts from a
 // clean slate: every key is explicitly cleared, then the case's values applied.
 var envKeys = []string{
+	"HOST",
 	"DATABASE_URL",
 	"OPENAI_API_KEY",
 	"OPENAI_BASE_URL",
@@ -72,6 +73,7 @@ func TestLoad(t *testing.T) {
 			},
 			want: config.Config{
 				DatabaseURL:     testDatabaseURL,
+				Host:            "127.0.0.1",
 				Port:            "8080",
 				OpenAIAPIKey:    testAPIKey,
 				OpenAIBaseURL:   "",
@@ -86,6 +88,7 @@ func TestLoad(t *testing.T) {
 				"DATABASE_URL":      testDatabaseURL,
 				"OPENAI_API_KEY":    testAPIKey,
 				"OPENAI_BASE_URL":   "http://127.0.0.1:1234/v1/",
+				"HOST":              "0.0.0.0",
 				"PORT":              "9999",
 				"LLM_MODEL":         "gpt-4.1",
 				"LLM_UTILITY_MODEL": "gpt-4.1-mini",
@@ -93,6 +96,7 @@ func TestLoad(t *testing.T) {
 			},
 			want: config.Config{
 				DatabaseURL:     testDatabaseURL,
+				Host:            "0.0.0.0",
 				Port:            "9999",
 				OpenAIAPIKey:    testAPIKey,
 				OpenAIBaseURL:   "http://127.0.0.1:1234/v1/",
@@ -113,6 +117,7 @@ func TestLoad(t *testing.T) {
 			},
 			want: config.Config{
 				DatabaseURL:     testDatabaseURL,
+				Host:            "127.0.0.1",
 				Port:            "8080",
 				OpenAIAPIKey:    testAPIKey,
 				LLMModel:        "gpt-4o",
@@ -130,6 +135,7 @@ func TestLoad(t *testing.T) {
 			},
 			want: config.Config{
 				DatabaseURL:     testDatabaseURL,
+				Host:            "127.0.0.1",
 				Port:            "8080",
 				OpenAIAPIKey:    testAPIKey,
 				LLMModel:        "gpt-4o",

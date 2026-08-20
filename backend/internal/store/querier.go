@@ -14,10 +14,16 @@ type Querier interface {
 	CompleteAgentRun(ctx context.Context, arg CompleteAgentRunParams) (AgentRun, error)
 	CreateConversation(ctx context.Context, arg CreateConversationParams) (Conversation, error)
 	FailAgentRun(ctx context.Context, arg FailAgentRunParams) (AgentRun, error)
-	GetConversation(ctx context.Context, id uuid.UUID) (Conversation, error)
+	// Scoped by user_id on purpose: keeping the ownership predicate in the query
+	// means a future handler cannot forget the Go-side check and open an IDOR.
+	GetConversation(ctx context.Context, arg GetConversationParams) (Conversation, error)
 	InsertAgentRun(ctx context.Context, arg InsertAgentRunParams) (AgentRun, error)
 	InsertLLMCall(ctx context.Context, arg InsertLLMCallParams) (LlmCall, error)
 	InsertMessage(ctx context.Context, arg InsertMessageParams) (Message, error)
+	// The sequence is computed inside the statement rather than tracked by the
+	// caller: a resumed or retried run has no in-process memory of how far the
+	// transcript already got, and guessing would collide with the
+	// unique (agent_run_id, seq) constraint and abort the whole transaction.
 	InsertRunEvent(ctx context.Context, arg InsertRunEventParams) (RunEvent, error)
 	ListConversationsByUser(ctx context.Context, userID uuid.UUID) ([]Conversation, error)
 	ListMessagesByConversation(ctx context.Context, conversationID uuid.UUID) ([]Message, error)

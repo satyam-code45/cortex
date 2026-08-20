@@ -1,5 +1,4 @@
 -- +goose Up
--- +goose StatementBegin
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS vector;
 
@@ -75,14 +74,11 @@ CREATE TABLE run_events (
     created_at   timestamptz NOT NULL DEFAULT now(),
     UNIQUE (agent_run_id, seq)
 );
--- +goose StatementEnd
 
 -- +goose Down
--- +goose StatementBegin
 DROP TABLE IF EXISTS run_events;
 DROP TABLE IF EXISTS llm_calls;
 DROP TABLE IF EXISTS agent_runs;
 DROP TABLE IF EXISTS messages;
 DROP TABLE IF EXISTS conversations;
 DROP TABLE IF EXISTS users;
--- +goose StatementEnd

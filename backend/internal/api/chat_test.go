@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -260,7 +261,7 @@ func TestChatHappyPathPersistsEverything(t *testing.T) {
 		t.Errorf("llm_calls = %d, want 1", n)
 	}
 
-	assertRunEventsAreOrdered(t, pool, runID)
+	assertRunEvents(t, pool, runID, []string{"run_started", "llm_call_completed", "run_completed"})
 }
 
 // TEST-1.3: passing conversation_id continues the existing conversation and
@@ -356,14 +357,15 @@ func TestChatProviderErrorStoresFailedRun(t *testing.T) {
 	}
 
 	var (
+		runID    uuid.UUID
 		status   string
 		runErr   *string
 		finished bool
 		answer   *string
 	)
 	if err := pool.QueryRow(ctx,
-		`SELECT status, error, finished_at IS NOT NULL, answer FROM agent_runs`).
-		Scan(&status, &runErr, &finished, &answer); err != nil {
+		`SELECT id, status, error, finished_at IS NOT NULL, answer FROM agent_runs`).
+		Scan(&runID, &status, &runErr, &finished, &answer); err != nil {
 		t.Fatalf("load agent_run: %v", err)
 	}
 	if status != "failed" {
@@ -387,6 +389,14 @@ func TestChatProviderErrorStoresFailedRun(t *testing.T) {
 	}
 	if n := queryInt(t, pool, `SELECT count(*) FROM llm_calls`); n != 0 {
 		t.Errorf("llm_calls = %d, want 0 after a failed call", n)
+	}
+
+	assertRunEvents(t, pool, runID, []string{"run_started", "run_failed"})
+
+	// The stored reason must be the classified summary, never the raw provider
+	// error: that text embeds the request URL and the upstream response body.
+	if runErr != nil && strings.Contains(*runErr, "http") {
+		t.Errorf("agent_run error = %q; must not contain the provider URL", *runErr)
 	}
 }
 
@@ -420,9 +430,10 @@ func TestChatUnknownConversationIsClientError(t *testing.T) {
 	}
 }
 
-// run_events is the replayable transcript (CLAUDE.md): when the handler writes
-// events, their seq must start at 1 and be gap-free per run.
-func assertRunEventsAreOrdered(t *testing.T, pool *pgxpool.Pool, runID uuid.UUID) {
+// run_events is the replayable transcript (CLAUDE.md). The exact event types
+// are asserted, not just their ordering: an assertion that only checks
+// monotonicity passes vacuously when the handler writes no events at all.
+func assertRunEvents(t *testing.T, pool *pgxpool.Pool, runID uuid.UUID, want []string) {
 	t.Helper()
 	rows, err := pool.Query(context.Background(),
 		`SELECT seq, type FROM run_events WHERE agent_run_id = $1 ORDER BY seq`, runID)
@@ -431,7 +442,10 @@ func assertRunEventsAreOrdered(t *testing.T, pool *pgxpool.Pool, runID uuid.UUID
 	}
 	defer rows.Close()
 
-	var seqs []int32
+	var (
+		seqs  []int32
+		types []string
+	)
 	for rows.Next() {
 		var (
 			seq       int32
@@ -440,17 +454,111 @@ func assertRunEventsAreOrdered(t *testing.T, pool *pgxpool.Pool, runID uuid.UUID
 		if err := rows.Scan(&seq, &eventType); err != nil {
 			t.Fatalf("scan run_event: %v", err)
 		}
-		if eventType == "" {
-			t.Error("run_event has an empty type")
-		}
 		seqs = append(seqs, seq)
+		types = append(types, eventType)
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("iterate run_events: %v", err)
+	}
+
+	if !reflect.DeepEqual(types, want) {
+		t.Errorf("run_events types = %v, want %v", types, want)
 	}
 	for i, seq := range seqs {
 		if seq != int32(i+1) {
 			t.Errorf("run_events seq[%d] = %d, want %d (seq must be gap-free from 1)", i, seq, i+1)
 		}
+	}
+}
+
+// A JSON content type is required so the endpoint is not a CORS-"simple"
+// request that any origin can POST without a preflight.
+func TestChatRequiresJSONContentType(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		contentType string
+		wantStatus  int
+	}{
+		{name: "json", contentType: "application/json", wantStatus: http.StatusBadRequest},
+		{name: "json with charset", contentType: "application/json; charset=utf-8", wantStatus: http.StatusBadRequest},
+		{name: "text plain is CORS-safelisted", contentType: "text/plain", wantStatus: http.StatusUnsupportedMediaType},
+		{name: "form is CORS-safelisted", contentType: "application/x-www-form-urlencoded", wantStatus: http.StatusUnsupportedMediaType},
+		{name: "absent", contentType: "", wantStatus: http.StatusUnsupportedMediaType},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			provider := &stubProvider{}
+			db := &stubDB{}
+			h := api.NewRouter(api.Deps{
+				DB: db, Provider: provider, Model: "gpt-4o",
+				DevUserEmail: devUserEmail, Logger: discardLogger(),
+			})
+
+			// An empty message keeps every case off the database: a request
+			// that clears the content-type check still stops at validation.
+			req := httptest.NewRequest(http.MethodPost, "/api/chat", strings.NewReader(`{"message":""}`))
+			if tt.contentType != "" {
+				req.Header.Set("Content-Type", tt.contentType)
+			}
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d", rec.Code, tt.wantStatus)
+			}
+			if provider.callCount() != 0 {
+				t.Errorf("provider called %d times, want 0", provider.callCount())
+			}
+		})
+	}
+}
+
+// An oversized body must be rejected before it is buffered into memory, and an
+// oversized message before it is persisted and replayed on every later turn.
+func TestChatRejectsOversizedInput(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		body       string
+		wantStatus int
+	}{
+		{
+			name:       "body over the reader cap",
+			body:       `{"message":"` + strings.Repeat("a", 128<<10) + `"}`,
+			wantStatus: http.StatusRequestEntityTooLarge,
+		},
+		{
+			name:       "message over the rune cap",
+			body:       `{"message":"` + strings.Repeat("b", 8001) + `"}`,
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			provider := &stubProvider{}
+			db := &stubDB{}
+			h := api.NewRouter(api.Deps{
+				DB: db, Provider: provider, Model: "gpt-4o",
+				DevUserEmail: devUserEmail, Logger: discardLogger(),
+			})
+
+			rec := postChat(t, h, tt.body)
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d", rec.Code, tt.wantStatus)
+			}
+			if provider.callCount() != 0 {
+				t.Errorf("provider called %d times, want 0", provider.callCount())
+			}
+			if db.begins != 0 {
+				t.Errorf("database transactions started = %d, want 0", db.begins)
+			}
+		})
 	}
 }

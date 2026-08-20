@@ -30,6 +30,15 @@ const (
 	shutdownTimeout = 10 * time.Second
 	// readHeaderTimeout guards against slow-header (Slowloris) clients.
 	readHeaderTimeout = 10 * time.Second
+	// readTimeout bounds the whole request read, closing the slow-body variant
+	// of the same attack: complete headers followed by a byte every 30s.
+	readTimeout = 30 * time.Second
+	// writeTimeout must stay above the handler's own LLM timeout, or a slow but
+	// successful answer would be cut off mid-response.
+	writeTimeout = 90 * time.Second
+	// idleTimeout reaps keep-alive connections; it otherwise defaults to
+	// readTimeout and never fires when that is zero.
+	idleTimeout = 120 * time.Second
 )
 
 func main() {
@@ -85,9 +94,12 @@ func run(logger *slog.Logger) error {
 	})
 
 	srv := &http.Server{
-		Addr:              net.JoinHostPort("", cfg.Port),
+		Addr:              net.JoinHostPort(cfg.Host, cfg.Port),
 		Handler:           handler,
 		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
 	}
 
 	// ListenAndServe blocks, so it runs in its own goroutine and reports a

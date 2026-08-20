@@ -13,24 +13,24 @@ import (
 
 const insertRunEvent = `-- name: InsertRunEvent :one
 INSERT INTO run_events (agent_run_id, seq, type, payload)
-VALUES ($1, $2, $3, $4)
+SELECT $1, coalesce(max(seq), 0) + 1, $2, $3
+FROM run_events
+WHERE agent_run_id = $1
 RETURNING id, agent_run_id, seq, type, payload, created_at
 `
 
 type InsertRunEventParams struct {
 	AgentRunID uuid.UUID `json:"agent_run_id"`
-	Seq        int32     `json:"seq"`
 	Type       string    `json:"type"`
 	Payload    []byte    `json:"payload"`
 }
 
+// The sequence is computed inside the statement rather than tracked by the
+// caller: a resumed or retried run has no in-process memory of how far the
+// transcript already got, and guessing would collide with the
+// unique (agent_run_id, seq) constraint and abort the whole transaction.
 func (q *Queries) InsertRunEvent(ctx context.Context, arg InsertRunEventParams) (RunEvent, error) {
-	row := q.db.QueryRow(ctx, insertRunEvent,
-		arg.AgentRunID,
-		arg.Seq,
-		arg.Type,
-		arg.Payload,
-	)
+	row := q.db.QueryRow(ctx, insertRunEvent, arg.AgentRunID, arg.Type, arg.Payload)
 	var i RunEvent
 	err := row.Scan(
 		&i.ID,

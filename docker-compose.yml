@@ -10,6 +10,7 @@ services:
       POSTGRES_DB: cortex
     volumes:
       - cortex_pgdata:/var/lib/postgresql/data
+      - ./backend/db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cortex -d cortex"]
       interval: 5s
