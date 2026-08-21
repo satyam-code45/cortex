@@ -1,0 +1,49 @@
+{
+  "startAt": 0,
+  "maxResults": 100,
+  "total": 3,
+  "isLast": true,
+  "values": [
+    {
+      "id": "40001",
+      "author": { "accountId": "5b10b9", "displayName": "Dev Account" },
+      "created": "2026-05-20T14:03:11.000+0000",
+      "items": [
+        {
+          "field": "duedate",
+          "fieldtype": "jira",
+          "fieldId": "duedate",
+          "from": "2026-06-15",
+          "fromString": "2026-06-15 00:00:00.0",
+          "to": "2026-07-31",
+          "toString": "2026-07-31 00:00:00.0"
+        }
+      ]
+    },
+    {
+      "id": "40002",
+      "author": { "accountId": "5b10b9", "displayName": "Dev Account" },
+      "created": "2026-06-01T11:45:00.000+0000",
+      "items": [
+        {
+          "field": "status",
+          "fieldtype": "jira",
+          "fieldId": "status",
+          "from": "10001",
+          "fromString": "In Progress",
+          "to": "10002",
+          "toString": "Blocked"
+        },
+        {
+          "field": "assignee",
+          "fieldtype": "jira",
+          "fieldId": "assignee",
+          "from": null,
+          "fromString": "",
+          "to": "5b10a2",
+          "toString": "Priya Raman"
+        }
+      ]
+    }
+  ]
+}

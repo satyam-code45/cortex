@@ -1,0 +1,28 @@
+{
+  "issues": [
+    {
+      "id": "10101",
+      "key": "ATLAS-101",
+      "fields": {
+        "summary": "Checkout fails on expired payment tokens",
+        "status": { "name": "Blocked" },
+        "assignee": { "accountId": "5b10a2", "displayName": "Priya Raman" },
+        "duedate": "2026-07-31",
+        "updated": "2026-06-12T10:31:02.000+0000"
+      }
+    },
+    {
+      "id": "10102",
+      "key": "ATLAS-102",
+      "fields": {
+        "summary": "Vendor sandbox credentials not issued",
+        "status": { "name": "In Progress" },
+        "assignee": null,
+        "duedate": null,
+        "updated": "2026-06-14T08:02:44.000+0000"
+      }
+    }
+  ],
+  "nextPageToken": "CAEaAggB",
+  "isLast": false
+}

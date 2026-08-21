@@ -18,12 +18,41 @@ var envKeys = []string{
 	"LLM_MODEL",
 	"LLM_UTILITY_MODEL",
 	"EMBEDDING_MODEL",
+	"MAX_ITERATIONS",
+	"AGENT_RUN_WORKERS",
+	"JIRA_BASE_URL",
+	"JIRA_EMAIL",
+	"JIRA_API_TOKEN",
 }
 
 const (
-	testDatabaseURL = "postgres://u:p@localhost:5432/db?sslmode=disable"
-	testAPIKey      = "sk-test-key"
+	testDatabaseURL  = "postgres://u:p@localhost:5432/db?sslmode=disable"
+	testAPIKey       = "sk-test-key"
+	testJiraBaseURL  = "https://test.atlassian.net"
+	testJiraEmail    = "dev@example.com"
+	testJiraAPIToken = "jira-test-token"
 )
+
+// requiredEnv is the minimum set that lets Load succeed, so a case can state
+// only what it is actually varying.
+func requiredEnv() map[string]string {
+	return map[string]string{
+		"DATABASE_URL":   testDatabaseURL,
+		"OPENAI_API_KEY": testAPIKey,
+		"JIRA_BASE_URL":  testJiraBaseURL,
+		"JIRA_EMAIL":     testJiraEmail,
+		"JIRA_API_TOKEN": testJiraAPIToken,
+	}
+}
+
+// withEnv returns the required set with overrides applied.
+func withEnv(overrides map[string]string) map[string]string {
+	env := requiredEnv()
+	for k, v := range overrides {
+		env[k] = v
+	}
+	return env
+}
 
 // TEST-1.1: required variables are enforced, defaults applied (REQ-1.5, REQ-1.8).
 func TestLoad(t *testing.T) {
@@ -37,40 +66,37 @@ func TestLoad(t *testing.T) {
 		want            config.Config
 	}{
 		{
-			name:            "missing both required vars are reported in one error",
+			name:            "every missing required var is reported in one error",
 			env:             map[string]string{},
 			wantErr:         true,
-			wantErrContains: []string{"DATABASE_URL", "OPENAI_API_KEY"},
+			wantErrContains: []string{"DATABASE_URL", "OPENAI_API_KEY", "JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"},
 		},
 		{
 			name:            "missing DATABASE_URL only",
-			env:             map[string]string{"OPENAI_API_KEY": testAPIKey},
+			env:             withEnv(map[string]string{"DATABASE_URL": ""}),
 			wantErr:         true,
 			wantErrContains: []string{"DATABASE_URL"},
-			wantErrOmits:    []string{"OPENAI_API_KEY"},
+			wantErrOmits:    []string{"OPENAI_API_KEY", "JIRA_BASE_URL"},
 		},
 		{
 			name:            "missing OPENAI_API_KEY only",
-			env:             map[string]string{"DATABASE_URL": testDatabaseURL},
+			env:             withEnv(map[string]string{"OPENAI_API_KEY": ""}),
 			wantErr:         true,
 			wantErrContains: []string{"OPENAI_API_KEY"},
-			wantErrOmits:    []string{"DATABASE_URL"},
+			wantErrOmits:    []string{"DATABASE_URL", "JIRA_BASE_URL"},
 		},
 		{
-			name: "empty required var counts as missing",
-			env: map[string]string{
-				"DATABASE_URL":   testDatabaseURL,
-				"OPENAI_API_KEY": "",
-			},
+			// Jira became required on Day 2: every agent tool reaches Jira, so a
+			// server without credentials cannot answer anything.
+			name:            "missing JIRA_API_TOKEN only",
+			env:             withEnv(map[string]string{"JIRA_API_TOKEN": ""}),
 			wantErr:         true,
-			wantErrContains: []string{"OPENAI_API_KEY"},
+			wantErrContains: []string{"JIRA_API_TOKEN"},
+			wantErrOmits:    []string{"DATABASE_URL", "OPENAI_API_KEY", "JIRA_BASE_URL", "JIRA_EMAIL"},
 		},
 		{
 			name: "defaults applied when optional vars unset",
-			env: map[string]string{
-				"DATABASE_URL":   testDatabaseURL,
-				"OPENAI_API_KEY": testAPIKey,
-			},
+			env:  requiredEnv(),
 			want: config.Config{
 				DatabaseURL:     testDatabaseURL,
 				Host:            "127.0.0.1",
@@ -80,20 +106,25 @@ func TestLoad(t *testing.T) {
 				LLMModel:        "gpt-4o",
 				LLMUtilityModel: "gpt-4o-mini",
 				EmbeddingModel:  "text-embedding-3-small",
+				MaxIterations:   12,
+				AgentRunWorkers: 4,
+				JiraBaseURL:     testJiraBaseURL,
+				JiraEmail:       testJiraEmail,
+				JiraAPIToken:    testJiraAPIToken,
 			},
 		},
 		{
 			name: "explicit values override every default",
-			env: map[string]string{
-				"DATABASE_URL":      testDatabaseURL,
-				"OPENAI_API_KEY":    testAPIKey,
+			env: withEnv(map[string]string{
 				"OPENAI_BASE_URL":   "http://127.0.0.1:1234/v1/",
 				"HOST":              "0.0.0.0",
 				"PORT":              "9999",
 				"LLM_MODEL":         "gpt-4.1",
 				"LLM_UTILITY_MODEL": "gpt-4.1-mini",
 				"EMBEDDING_MODEL":   "text-embedding-3-large",
-			},
+				"MAX_ITERATIONS":    "5",
+				"AGENT_RUN_WORKERS": "2",
+			}),
 			want: config.Config{
 				DatabaseURL:     testDatabaseURL,
 				Host:            "0.0.0.0",
@@ -103,18 +134,23 @@ func TestLoad(t *testing.T) {
 				LLMModel:        "gpt-4.1",
 				LLMUtilityModel: "gpt-4.1-mini",
 				EmbeddingModel:  "text-embedding-3-large",
+				MaxIterations:   5,
+				AgentRunWorkers: 2,
+				JiraBaseURL:     testJiraBaseURL,
+				JiraEmail:       testJiraEmail,
+				JiraAPIToken:    testJiraAPIToken,
 			},
 		},
 		{
 			name: "empty optional vars fall back to defaults",
-			env: map[string]string{
-				"DATABASE_URL":      testDatabaseURL,
-				"OPENAI_API_KEY":    testAPIKey,
+			env: withEnv(map[string]string{
 				"PORT":              "",
 				"LLM_MODEL":         "",
 				"LLM_UTILITY_MODEL": "",
 				"EMBEDDING_MODEL":   "",
-			},
+				"MAX_ITERATIONS":    "",
+				"AGENT_RUN_WORKERS": "",
+			}),
 			want: config.Config{
 				DatabaseURL:     testDatabaseURL,
 				Host:            "127.0.0.1",
@@ -123,16 +159,59 @@ func TestLoad(t *testing.T) {
 				LLMModel:        "gpt-4o",
 				LLMUtilityModel: "gpt-4o-mini",
 				EmbeddingModel:  "text-embedding-3-small",
+				MaxIterations:   12,
+				AgentRunWorkers: 4,
+				JiraBaseURL:     testJiraBaseURL,
+				JiraEmail:       testJiraEmail,
+				JiraAPIToken:    testJiraAPIToken,
+			},
+		},
+		{
+			// A tuning knob must never stop the server booting: an unparseable
+			// value falls back to the documented default.
+			name: "unparseable numeric vars fall back to defaults",
+			env: withEnv(map[string]string{
+				"MAX_ITERATIONS":    "twelve",
+				"AGENT_RUN_WORKERS": "-3",
+			}),
+			want: config.Config{
+				DatabaseURL:     testDatabaseURL,
+				Host:            "127.0.0.1",
+				Port:            "8080",
+				OpenAIAPIKey:    testAPIKey,
+				LLMModel:        "gpt-4o",
+				LLMUtilityModel: "gpt-4o-mini",
+				EmbeddingModel:  "text-embedding-3-small",
+				MaxIterations:   12,
+				AgentRunWorkers: 4,
+				JiraBaseURL:     testJiraBaseURL,
+				JiraEmail:       testJiraEmail,
+				JiraAPIToken:    testJiraAPIToken,
+			},
+		},
+		{
+			// A trailing slash on the site URL would produce "//rest/api/3/..."
+			// in every request path.
+			name: "trailing slash is trimmed from JIRA_BASE_URL",
+			env:  withEnv(map[string]string{"JIRA_BASE_URL": testJiraBaseURL + "/"}),
+			want: config.Config{
+				DatabaseURL:     testDatabaseURL,
+				Host:            "127.0.0.1",
+				Port:            "8080",
+				OpenAIAPIKey:    testAPIKey,
+				LLMModel:        "gpt-4o",
+				LLMUtilityModel: "gpt-4o-mini",
+				EmbeddingModel:  "text-embedding-3-small",
+				MaxIterations:   12,
+				AgentRunWorkers: 4,
+				JiraBaseURL:     testJiraBaseURL,
+				JiraEmail:       testJiraEmail,
+				JiraAPIToken:    testJiraAPIToken,
 			},
 		},
 		{
 			name: "unrelated later-day vars are ignored",
-			env: map[string]string{
-				"DATABASE_URL":    testDatabaseURL,
-				"OPENAI_API_KEY":  testAPIKey,
-				"FRONTEND_ORIGIN": "http://localhost:3000",
-				"JIRA_BASE_URL":   "https://example.atlassian.net",
-			},
+			env:  withEnv(map[string]string{"FRONTEND_ORIGIN": "http://localhost:3000"}),
 			want: config.Config{
 				DatabaseURL:     testDatabaseURL,
 				Host:            "127.0.0.1",
@@ -141,6 +220,11 @@ func TestLoad(t *testing.T) {
 				LLMModel:        "gpt-4o",
 				LLMUtilityModel: "gpt-4o-mini",
 				EmbeddingModel:  "text-embedding-3-small",
+				MaxIterations:   12,
+				AgentRunWorkers: 4,
+				JiraBaseURL:     testJiraBaseURL,
+				JiraEmail:       testJiraEmail,
+				JiraAPIToken:    testJiraAPIToken,
 			},
 		},
 	}
@@ -180,7 +264,9 @@ func TestLoad(t *testing.T) {
 				t.Fatal("Load() returned nil config with nil error")
 			}
 			if *cfg != tt.want {
-				t.Errorf("Load() = %+v, want %+v", *cfg, tt.want)
+				// Config implements Stringer with its secrets redacted, so this
+				// message cannot leak the API key or the Jira token.
+				t.Errorf("Load() = %v, want %v", *cfg, tt.want)
 			}
 		})
 	}

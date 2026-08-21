@@ -93,6 +93,40 @@ func (q *Queries) FailAgentRun(ctx context.Context, arg FailAgentRunParams) (Age
 	return i, err
 }
 
+const getAgentRunForUser = `-- name: GetAgentRunForUser :one
+SELECT r.id, r.conversation_id, r.query, r.status, r.model, r.answer, r.error, r.latency_ms, r.input_tokens, r.output_tokens, r.created_at, r.finished_at FROM agent_runs r
+         JOIN conversations c ON c.id = r.conversation_id
+WHERE r.id = $1 AND c.user_id = $2
+`
+
+type GetAgentRunForUserParams struct {
+	ID     uuid.UUID `json:"id"`
+	UserID uuid.UUID `json:"user_id"`
+}
+
+// Ownership is enforced in the query, not in Go: GET /api/runs/{id} takes a
+// caller-supplied UUID, and joining through conversations is what stops it
+// being an IDOR the moment a second user exists.
+func (q *Queries) GetAgentRunForUser(ctx context.Context, arg GetAgentRunForUserParams) (AgentRun, error) {
+	row := q.db.QueryRow(ctx, getAgentRunForUser, arg.ID, arg.UserID)
+	var i AgentRun
+	err := row.Scan(
+		&i.ID,
+		&i.ConversationID,
+		&i.Query,
+		&i.Status,
+		&i.Model,
+		&i.Answer,
+		&i.Error,
+		&i.LatencyMs,
+		&i.InputTokens,
+		&i.OutputTokens,
+		&i.CreatedAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
 const insertAgentRun = `-- name: InsertAgentRun :one
 INSERT INTO agent_runs (conversation_id, query, status, model)
 VALUES ($1, $2, $3, $4)
@@ -113,6 +147,38 @@ func (q *Queries) InsertAgentRun(ctx context.Context, arg InsertAgentRunParams) 
 		arg.Status,
 		arg.Model,
 	)
+	var i AgentRun
+	err := row.Scan(
+		&i.ID,
+		&i.ConversationID,
+		&i.Query,
+		&i.Status,
+		&i.Model,
+		&i.Answer,
+		&i.Error,
+		&i.LatencyMs,
+		&i.InputTokens,
+		&i.OutputTokens,
+		&i.CreatedAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
+const startAgentRun = `-- name: StartAgentRun :one
+UPDATE agent_runs
+SET status = 'running'
+WHERE id = $1
+  AND status IN ('pending', 'running')
+RETURNING id, conversation_id, query, status, model, answer, error, latency_ms, input_tokens, output_tokens, created_at, finished_at
+`
+
+// Claims a queued run. The status guard makes the transition idempotent for a
+// River job that is retried after a worker crash (still 'running'), while
+// refusing to restart a run that already reached a terminal state — returning
+// no rows is the signal to skip.
+func (q *Queries) StartAgentRun(ctx context.Context, id uuid.UUID) (AgentRun, error) {
+	row := q.db.QueryRow(ctx, startAgentRun, id)
 	var i AgentRun
 	err := row.Scan(
 		&i.ID,

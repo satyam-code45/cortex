@@ -1,0 +1,247 @@
+{
+  "company": "Vantage Labs",
+  "as_of": "2026-08-21",
+  "note": "Derived from seeder/fixtures/. Issues are identified by summary because Jira assigns keys at seed time.",
+  "projects": {
+    "ATLAS": {
+      "name": "Atlas",
+      "lead": "Priya Raman"
+    },
+    "BEACON": {
+      "name": "Beacon",
+      "lead": "Tomas Ferreira"
+    },
+    "COMET": {
+      "name": "Comet",
+      "lead": "Oskar Nowak"
+    }
+  },
+  "facts": {
+    "atlas_launch": {
+      "original_date": "2026-06-30",
+      "revised_date": "2026-08-14",
+      "reason": "The payment provider did not deliver the v3 refunds sandbox, which blocked the refunds epic. A biller that cannot process a refund was judged not launchable.",
+      "decided_by": "Marcus Whitfield, confirmed by Fatima Al-Rashid",
+      "note_for_multi_hop": "Jira never names the provider. Day 3 adds a Notion plan that names Nordwind Payments and a Nordwind email carrying the delay announcement."
+    },
+    "atlas_blocked_issues": [
+      {
+        "summary": "Integrate refunds API with the payment provider sandbox",
+        "owner": "Priya Raman",
+        "blocked_by": "The payment provider has not delivered the v3 refunds sandbox.",
+        "blocker_type": "external vendor",
+        "root_cause": "Provider slipped the v3 refunds sandbox with no firm date."
+      },
+      {
+        "summary": "Refund reconciliation nightly job",
+        "owner": "Aisha Okonkwo",
+        "blocked_by": "Depends on the refunds API integration.",
+        "blocker_type": "transitive on an external blocker",
+        "root_cause": "Same provider sandbox delay, one hop removed."
+      },
+      {
+        "summary": "Chargeback webhook receiver",
+        "owner": "Diego Santos",
+        "blocked_by": "The provider has not published the v3 webhook signature-verification spec.",
+        "blocker_type": "external vendor",
+        "root_cause": "v2 signing documentation does not apply to v3; the header name and canonicalisation changed."
+      },
+      {
+        "summary": "Refund request API for support agents",
+        "owner": "Aisha Okonkwo",
+        "blocked_by": "Depends on the refunds API integration.",
+        "blocker_type": "transitive on an external blocker",
+        "root_cause": "Same provider sandbox delay."
+      },
+      {
+        "summary": "Usage event schema alignment with Beacon",
+        "owner": "Priya Raman",
+        "blocked_by": "Was blocked on Beacon freezing the v2 event envelope. Now resolved.",
+        "blocker_type": "internal cross-team",
+        "root_cause": "The Beacon v2 envelope freeze waited on the identity resolution rewrite. Both have since landed.",
+        "resolved": true
+      }
+    ],
+    "deadline_changes": [
+      {
+        "summary": "Integrate refunds API with the payment provider sandbox",
+        "original": "2026-06-15",
+        "current": "2026-08-07",
+        "changes": 2,
+        "reason": "Provider sandbox delay, twice."
+      },
+      {
+        "summary": "Refund reconciliation nightly job",
+        "original": "2026-06-22",
+        "current": "2026-08-14",
+        "changes": 2,
+        "reason": "Transitively blocked on the refunds integration."
+      },
+      {
+        "summary": "Chargeback webhook receiver",
+        "original": "2026-06-29",
+        "current": "2026-07-31",
+        "changes": 1,
+        "reason": "Missing v3 webhook signing spec."
+      },
+      {
+        "summary": "Metered usage billing engine",
+        "original": "2026-06-30",
+        "current": "2026-08-14",
+        "changes": 1,
+        "reason": "Follows the revised launch date; not itself late."
+      },
+      {
+        "summary": "Launch readiness review for the billing platform",
+        "original": "2026-06-26",
+        "current": "2026-08-11",
+        "changes": 1,
+        "reason": "First review was no-go on blocked refunds and chargebacks."
+      },
+      {
+        "summary": "Usage event schema alignment with Beacon",
+        "original": "2026-06-05",
+        "current": "2026-07-03",
+        "changes": 1,
+        "reason": "Beacon envelope freeze slipped behind the identity rewrite."
+      },
+      {
+        "summary": "Freeze the v2 event envelope",
+        "original": "2026-05-29",
+        "current": "2026-07-03",
+        "changes": 2,
+        "reason": "Blocked on the identity resolution rewrite."
+      },
+      {
+        "summary": "Identity resolution rewrite",
+        "original": "2026-05-22",
+        "current": "2026-06-26",
+        "changes": 1,
+        "reason": "Scope grew after the shared-IP mis-merge bug."
+      },
+      {
+        "summary": "Refund request API for support agents",
+        "original": "2026-07-03",
+        "current": "2026-08-14",
+        "changes": 1,
+        "reason": "Blocked on the refunds integration."
+      },
+      {
+        "summary": "Tax calculation for EU VAT and US sales tax",
+        "original": "2026-07-31",
+        "current": "2026-08-21",
+        "changes": 1,
+        "reason": "Compliance review of rate storage."
+      },
+      {
+        "summary": "Event ingestion backpressure handling",
+        "original": "2026-07-10",
+        "current": "2026-08-07",
+        "changes": 1,
+        "reason": "Blocked on a Kafka partition quota increase."
+      },
+      {
+        "summary": "In-app plan management screens",
+        "original": "2026-07-24",
+        "current": "2026-09-04",
+        "changes": 1,
+        "reason": "Blocked on the Atlas billing portal API."
+      }
+    ],
+    "cross_project_dependencies": [
+      {
+        "from": "ATLAS / Usage event schema alignment with Beacon",
+        "to": "BEACON / Freeze the v2 event envelope",
+        "status": "resolved 2026-07-03"
+      },
+      {
+        "from": "BEACON / Freeze the v2 event envelope",
+        "to": "BEACON / Identity resolution rewrite",
+        "status": "resolved 2026-06-26"
+      },
+      {
+        "from": "COMET / In-app plan management screens",
+        "to": "ATLAS / Customer-facing billing portal skeleton",
+        "status": "open"
+      }
+    ],
+    "blocked_issues_by_project": {
+      "ATLAS": 4,
+      "BEACON": 1,
+      "COMET": 1
+    },
+    "owners": {
+      "refunds": "Priya Raman",
+      "reconciliation": "Aisha Okonkwo",
+      "chargebacks": "Diego Santos",
+      "beacon_envelope": "Tomas Ferreira",
+      "identity_resolution": "Nadia Haddad",
+      "comet_plan_management": "Oskar Nowak"
+    }
+  },
+  "questions": [
+    {
+      "question": "Which issues in Project Atlas are blocked, and why?",
+      "expected_answer": "Four Atlas issues are currently blocked: the refunds API integration (Priya Raman) and the chargeback webhook receiver (Diego Santos) are blocked directly on the payment provider - the v3 refunds sandbox has not been delivered and the v3 webhook signing spec has not been published. The refund reconciliation nightly job and the support-agent refund request API (both Aisha Okonkwo) are blocked transitively on the refunds integration. A fifth, the Beacon usage event schema alignment, was blocked on Beacon's v2 envelope freeze and is now resolved.",
+      "expected_sources": [
+        "Integrate refunds API with the payment provider sandbox",
+        "Chargeback webhook receiver",
+        "Refund reconciliation nightly job",
+        "Refund request API for support agents"
+      ],
+      "requires": [
+        "jira_search_issues",
+        "jira_get_comments"
+      ]
+    },
+    {
+      "question": "What was the original due date of the Atlas issue \"Integrate refunds API with the payment provider sandbox\", and how many times did it move?",
+      "expected_answer": "The refunds API integration was originally due 2026-06-15. It moved twice, to 2026-07-10 and then to 2026-08-07, both times because the payment provider had not delivered the v3 refunds sandbox.",
+      "expected_sources": [
+        "Integrate refunds API with the payment provider sandbox"
+      ],
+      "requires": [
+        "jira_search_issues",
+        "jira_get_issue_history"
+      ],
+      "note": "Names the issue explicitly. Atlas has four refunds issues with different histories, so a question phrased as \"the refunds work\" is ambiguous and would fail the eval against a correct answer about a different issue."
+    },
+    {
+      "question": "Why did the Atlas billing launch move from June to August?",
+      "expected_answer": "The launch moved from 2026-06-30 to 2026-08-14 because the refunds epic was blocked on the payment provider's v3 refunds sandbox, and the launch readiness review was a no-go on the grounds that a biller which cannot process a refund is not launchable.",
+      "expected_sources": [
+        "Launch readiness review for the billing platform",
+        "Metered usage billing engine",
+        "Integrate refunds API with the payment provider sandbox"
+      ],
+      "requires": [
+        "jira_search_issues",
+        "jira_get_comments"
+      ]
+    },
+    {
+      "question": "Which Atlas work was held up by another team rather than by a vendor?",
+      "expected_answer": "The usage event schema alignment was held up by Beacon, which could not freeze the v2 event envelope until the identity resolution rewrite landed. It was blocked for about four weeks and resolved on 2026-07-03.",
+      "expected_sources": [
+        "Usage event schema alignment with Beacon",
+        "Freeze the v2 event envelope",
+        "Identity resolution rewrite"
+      ],
+      "requires": [
+        "jira_search_issues",
+        "jira_get_comments"
+      ]
+    },
+    {
+      "question": "Who owns the chargeback work and what is the security concern raised on it?",
+      "expected_answer": "Diego Santos owns the chargeback webhook receiver. Julian Vega objected to shipping it without signature verification, because an unauthenticated webhook that opens dispute records is an abuse vector even behind a feature flag. It remains blocked rather than shipped unverified.",
+      "expected_sources": [
+        "Chargeback webhook receiver"
+      ],
+      "requires": [
+        "jira_search_issues",
+        "jira_get_comments"
+      ]
+    }
+  ]
+}

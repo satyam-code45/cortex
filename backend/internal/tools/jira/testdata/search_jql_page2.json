@@ -1,0 +1,16 @@
+{
+  "issues": [
+    {
+      "id": "10103",
+      "key": "ATLAS-103",
+      "fields": {
+        "summary": "Reconciliation job times out nightly",
+        "status": { "name": "To Do" },
+        "assignee": { "accountId": "5b10a2", "displayName": "Priya Raman" },
+        "duedate": "2026-08-14",
+        "updated": "2026-06-15T21:14:00.000+0000"
+      }
+    }
+  ],
+  "isLast": true
+}

@@ -1,0 +1,101 @@
+{
+  "company": "Vantage Labs",
+  "description": "Vantage Labs builds a B2B product analytics platform. Three engineering projects: Atlas (payments and billing), Beacon (customer data platform), and Comet (mobile app).",
+  "people": [
+    {
+      "name": "Priya Raman",
+      "role": "Staff Engineer",
+      "team": "Atlas"
+    },
+    {
+      "name": "Marcus Whitfield",
+      "role": "Engineering Manager",
+      "team": "Atlas"
+    },
+    {
+      "name": "Aisha Okonkwo",
+      "role": "Senior Backend Engineer",
+      "team": "Atlas"
+    },
+    {
+      "name": "Diego Santos",
+      "role": "Backend Engineer",
+      "team": "Atlas"
+    },
+    {
+      "name": "Lena Fischer",
+      "role": "Product Manager",
+      "team": "Atlas"
+    },
+    {
+      "name": "Tomas Ferreira",
+      "role": "Staff Engineer",
+      "team": "Beacon"
+    },
+    {
+      "name": "Nadia Haddad",
+      "role": "Senior Data Engineer",
+      "team": "Beacon"
+    },
+    {
+      "name": "Ravi Iyer",
+      "role": "Data Engineer",
+      "team": "Beacon"
+    },
+    {
+      "name": "Grace Lin",
+      "role": "Product Manager",
+      "team": "Beacon"
+    },
+    {
+      "name": "Oskar Nowak",
+      "role": "Staff Engineer",
+      "team": "Comet"
+    },
+    {
+      "name": "Yuki Tanaka",
+      "role": "iOS Engineer",
+      "team": "Comet"
+    },
+    {
+      "name": "Sofia Moreau",
+      "role": "Android Engineer",
+      "team": "Comet"
+    },
+    {
+      "name": "Ethan Brooks",
+      "role": "QA Lead",
+      "team": "Platform"
+    },
+    {
+      "name": "Fatima Al-Rashid",
+      "role": "Director of Engineering",
+      "team": "Platform"
+    },
+    {
+      "name": "Julian Vega",
+      "role": "Site Reliability Engineer",
+      "team": "Platform"
+    }
+  ],
+  "projects": [
+    {
+      "key": "ATLAS",
+      "name": "Atlas",
+      "description": "Atlas - payments and billing platform. Replaces the legacy subscription biller with metered usage billing, refunds, and chargebacks.",
+      "lead": "Priya Raman"
+    },
+    {
+      "key": "BEACON",
+      "name": "Beacon",
+      "description": "Beacon - customer data platform. Event ingestion, identity resolution, and the warehouse models the rest of the product reads from.",
+      "lead": "Tomas Ferreira"
+    },
+    {
+      "key": "COMET",
+      "name": "Comet",
+      "description": "Comet - mobile app for iOS and Android. Dashboards, alerts, and in-app plan management.",
+      "lead": "Oskar Nowak"
+    }
+  ]
+}

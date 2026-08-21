@@ -14,6 +14,10 @@ type Querier interface {
 	CompleteAgentRun(ctx context.Context, arg CompleteAgentRunParams) (AgentRun, error)
 	CreateConversation(ctx context.Context, arg CreateConversationParams) (Conversation, error)
 	FailAgentRun(ctx context.Context, arg FailAgentRunParams) (AgentRun, error)
+	// Ownership is enforced in the query, not in Go: GET /api/runs/{id} takes a
+	// caller-supplied UUID, and joining through conversations is what stops it
+	// being an IDOR the moment a second user exists.
+	GetAgentRunForUser(ctx context.Context, arg GetAgentRunForUserParams) (AgentRun, error)
 	// Scoped by user_id on purpose: keeping the ownership predicate in the query
 	// means a future handler cannot forget the Go-side check and open an IDOR.
 	GetConversation(ctx context.Context, arg GetConversationParams) (Conversation, error)
@@ -27,6 +31,14 @@ type Querier interface {
 	InsertRunEvent(ctx context.Context, arg InsertRunEventParams) (RunEvent, error)
 	ListConversationsByUser(ctx context.Context, userID uuid.UUID) ([]Conversation, error)
 	ListMessagesByConversation(ctx context.Context, conversationID uuid.UUID) ([]Message, error)
+	// Ordered by seq, not created_at: two events written inside one transaction can
+	// share a timestamp, and the transcript's order is the thing being replayed.
+	ListRunEventsByRun(ctx context.Context, agentRunID uuid.UUID) ([]RunEvent, error)
+	// Claims a queued run. The status guard makes the transition idempotent for a
+	// River job that is retried after a worker crash (still 'running'), while
+	// refusing to restart a run that already reached a terminal state — returning
+	// no rows is the signal to skip.
+	StartAgentRun(ctx context.Context, id uuid.UUID) (AgentRun, error)
 	TouchConversation(ctx context.Context, id uuid.UUID) error
 	// Idempotent by email: returns the existing row when the user already exists.
 	UpsertUser(ctx context.Context, email string) (User, error)

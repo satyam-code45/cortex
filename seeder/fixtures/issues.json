@@ -1,0 +1,1852 @@
+[
+  {
+    "project": "ATLAS",
+    "type": "Story",
+    "summary": "Integrate refunds API with the payment provider sandbox",
+    "description": "Wire the refunds service to the provider's v3 refunds API. Needs the provider's sandbox to be available for contract testing before we can certify.\nOwner: Priya Raman. Blocks the whole refunds epic and therefore the launch.\nBLOCKED: the provider has not delivered the v3 refunds sandbox.",
+    "owner": "Priya Raman",
+    "priority": "Highest",
+    "labels": [
+      "refunds",
+      "blocked",
+      "launch-critical",
+      "provider-dependency"
+    ],
+    "due_date": "2026-06-15",
+    "due_date_changes": [
+      "2026-07-10",
+      "2026-08-07"
+    ],
+    "transitions": [
+      "In Progress"
+    ],
+    "comments": [
+      {
+        "author": "Priya Raman",
+        "body": "Contract tests are written and passing against our own mock. We cannot certify without the provider's v3 refunds sandbox."
+      },
+      {
+        "author": "Priya Raman",
+        "body": "Escalated to our account manager. The provider says the v3 refunds sandbox has slipped again and gave no firm date. This is now the single blocker on the refunds epic."
+      },
+      {
+        "author": "Marcus Whitfield",
+        "body": "Confirming for the record: this is blocked externally, not on our engineering capacity. Priya has nothing further she can do here. Moving the due date out a second time."
+      },
+      {
+        "author": "Lena Fischer",
+        "body": "The delay notice came in by email from the provider, not through the partner portal, so it is not linked on this ticket. See the Atlas launch plan for the provider contact details."
+      }
+    ]
+  },
+  {
+    "project": "ATLAS",
+    "type": "Task",
+    "summary": "Refund reconciliation nightly job",
+    "description": "Nightly job reconciles our refund ledger against the provider's settlement report and raises a discrepancy alert. Cannot be built until the refunds API integration lands.\nOwner: Aisha Okonkwo.\nBLOCKED: depends on the refunds API integration, which is itself blocked on the provider.",
+    "owner": "Aisha Okonkwo",
+    "priority": "High",
+    "labels": [
+      "refunds",
+      "blocked",
+      "launch-critical"
+    ],
+    "due_date": "2026-06-22",
+    "due_date_changes": [
+      "2026-07-17",
+      "2026-08-14"
+    ],
+    "transitions": [],
+    "comments": [
+      {
+        "author": "Aisha Okonkwo",
+        "body": "Schema and the discrepancy rules are designed and reviewed. I cannot write the settlement parser without a real settlement file from the provider sandbox."
+      },
+      {
+        "author": "Aisha Okonkwo",
+        "body": "Blocked transitively on the refunds API integration. Picking up the invoice PDF work instead so this sprint is not wasted."
+      }
+    ]
+  },
+  {
+    "project": "ATLAS",
+    "type": "Story",
+    "summary": "Chargeback webhook receiver",
+    "description": "Receive and verify chargeback webhooks from the provider, then open a dispute record.\nOwner: Diego Santos.\nBLOCKED: the provider has not published the webhook signature-verification spec for v3, so we cannot verify authenticity and will not accept unverified webhooks.",
+    "owner": "Diego Santos",
+    "priority": "High",
+    "labels": [
+      "chargebacks",
+      "blocked",
+      "security"
+    ],
+    "due_date": "2026-06-29",
+    "due_date_changes": [
+      "2026-07-31"
+    ],
+    "transitions": [
+      "In Progress"
+    ],
+    "comments": [
+      {
+        "author": "Diego Santos",
+        "body": "Receiver and dispute records are done behind a feature flag. The signature verification is stubbed out."
+      },
+      {
+        "author": "Diego Santos",
+        "body": "Their v2 signing doc does not apply to v3 - the header name and the canonicalisation both changed. Asked for the v3 spec, no reply yet."
+      },
+      {
+        "author": "Julian Vega",
+        "body": "Do not ship this without verification. An unauthenticated webhook that opens dispute records is an abuse vector, flag or no flag."
+      },
+      {
+        "author": "Diego Santos",
+        "body": "Agreed, staying blocked rather than shipping it unverified."
+      }
+    ]
+  },
+  {
+    "project": "ATLAS",
+    "type": "Task",
+    "summary": "Usage event schema alignment with Beacon",
+    "description": "Metered billing reads usage events from Beacon. The event envelope has to be agreed and versioned before we can bill from it.\nOwner: Priya Raman, with Tomas Ferreira on the Beacon side.\nWas blocked for four weeks waiting on the Beacon team to freeze the v2 event envelope; resolved once the freeze landed.",
+    "owner": "Priya Raman",
+    "priority": "High",
+    "labels": [
+      "metered-billing",
+      "cross-team",
+      "was-blocked"
+    ],
+    "due_date": "2026-06-05",
+    "due_date_changes": [
+      "2026-07-03"
+    ],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": [
+      {
+        "author": "Priya Raman",
+        "body": "We need idempotency keys and a monotonic sequence on the envelope, otherwise a replay double-bills the customer."
+      },
+      {
+        "author": "Tomas Ferreira",
+        "body": "Both are in the v2 envelope draft. The freeze is waiting on the identity resolution rewrite landing first."
+      },
+      {
+        "author": "Tomas Ferreira",
+        "body": "v2 envelope is frozen as of today. Atlas is unblocked on this one."
+      },
+      {
+        "author": "Priya Raman",
+        "body": "Confirmed against the frozen schema, closing. This was blocked for four weeks on the Beacon dependency."
+      }
+    ]
+  },
+  {
+    "project": "ATLAS",
+    "type": "Story",
+    "summary": "Metered usage billing engine",
+    "description": "Rate usage events into billable line items with proration and tier boundaries.\nOwner: Priya Raman.",
+    "owner": "Priya Raman",
+    "priority": "Highest",
+    "labels": [
+      "metered-billing",
+      "launch-critical"
+    ],
+    "due_date": "2026-06-30",
+    "due_date_changes": [
+      "2026-08-14"
+    ],
+    "transitions": [
+      "In Progress"
+    ],
+    "comments": [
+      {
+        "author": "Priya Raman",
+        "body": "Tier boundary arithmetic is the fiddly part - a customer crossing a tier mid-period has to be prorated on both sides of the boundary."
+      },
+      {
+        "author": "Lena Fischer",
+        "body": "Moving the due date to the revised launch date. The launch moved from 30 June to 14 August because of the provider refunds delay; this engine follows the launch, it is not itself late."
+      }
+    ]
+  },
+  {
+    "project": "ATLAS",
+    "type": "Task",
+    "summary": "Invoice PDF rendering service",
+    "description": "Render invoices to PDF with line items, tax lines, and a payment link.\nOwner: Aisha Okonkwo.",
+    "owner": "Aisha Okonkwo",
+    "priority": "Medium",
+    "labels": [
+      "invoicing"
+    ],
+    "due_date": "2026-07-24",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": [
+      {
+        "author": "Aisha Okonkwo",
+        "body": "Picked this up while blocked on reconciliation. Done and reviewed."
+      }
+    ]
+  },
+  {
+    "project": "ATLAS",
+    "type": "Story",
+    "summary": "Proration on mid-cycle plan changes",
+    "description": "Credit the unused remainder and charge the new plan pro rata when a customer upgrades or downgrades mid-cycle.\nOwner: Diego Santos.",
+    "owner": "Diego Santos",
+    "priority": "High",
+    "labels": [
+      "metered-billing"
+    ],
+    "due_date": "2026-07-15",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": [
+      {
+        "author": "Ethan Brooks",
+        "body": "Found a rounding bug on downgrade: we credited one cent more than we charged. Fixed and covered by a test."
+      }
+    ]
+  },
+  {
+    "project": "ATLAS",
+    "type": "Task",
+    "summary": "Dunning and retry schedule for failed payments",
+    "description": "Retry failed charges on a 1/3/7 day schedule, then suspend and notify.\nOwner: Diego Santos.",
+    "owner": "Diego Santos",
+    "priority": "High",
+    "labels": [
+      "dunning"
+    ],
+    "due_date": "2026-08-07",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress"
+    ],
+    "comments": [
+      {
+        "author": "Diego Santos",
+        "body": "Retry schedule is in. The suspension email copy is with Lena."
+      }
+    ]
+  },
+  {
+    "project": "ATLAS",
+    "type": "Story",
+    "summary": "Tax calculation for EU VAT and US sales tax",
+    "description": "Compute tax per jurisdiction and store the rate used, so an invoice can be reproduced later.\nOwner: Aisha Okonkwo.",
+    "owner": "Aisha Okonkwo",
+    "priority": "High",
+    "labels": [
+      "tax",
+      "compliance"
+    ],
+    "due_date": "2026-07-31",
+    "due_date_changes": [
+      "2026-08-21"
+    ],
+    "transitions": [
+      "In Progress"
+    ],
+    "comments": [
+      {
+        "author": "Aisha Okonkwo",
+        "body": "Storing the rate rather than recomputing it - rates change and an old invoice has to stay reproducible."
+      },
+      {
+        "author": "Fatima Al-Rashid",
+        "body": "Compliance signed off on that approach. Keep the rate and the jurisdiction on the line item."
+      }
+    ]
+  },
+  {
+    "project": "ATLAS",
+    "type": "Story",
+    "summary": "Migrate legacy subscriptions to the new biller",
+    "description": "One-off migration of 4,100 live subscriptions from the legacy biller, with a dry-run mode and a reconciliation report.\nOwner: Priya Raman.",
+    "owner": "Priya Raman",
+    "priority": "Highest",
+    "labels": [
+      "migration",
+      "launch-critical"
+    ],
+    "due_date": "2026-08-14",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress"
+    ],
+    "comments": [
+      {
+        "author": "Priya Raman",
+        "body": "Dry run over a production snapshot: 4,087 of 4,100 migrate clean. The 13 failures are all legacy annual plans with a manual discount."
+      },
+      {
+        "author": "Marcus Whitfield",
+        "body": "13 by hand is acceptable. Do not build tooling for them."
+      }
+    ]
+  },
+  {
+    "project": "ATLAS",
+    "type": "Task",
+    "summary": "Payment method vaulting and card updater",
+    "description": "Store payment methods with the provider's vault and subscribe to their card-updater feed.\nOwner: Diego Santos.",
+    "owner": "Diego Santos",
+    "priority": "Medium",
+    "labels": [
+      "provider-dependency"
+    ],
+    "due_date": "2026-07-10",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": [
+      {
+        "author": "Diego Santos",
+        "body": "Vaulting works on v2, which is unaffected by the v3 refunds delay."
+      }
+    ]
+  },
+  {
+    "project": "ATLAS",
+    "type": "Task",
+    "summary": "Refund request API for support agents",
+    "description": "Internal endpoint letting a support agent issue a full or partial refund, with an audit trail.\nOwner: Aisha Okonkwo.\nBLOCKED: needs the refunds API integration underneath it.",
+    "owner": "Aisha Okonkwo",
+    "priority": "High",
+    "labels": [
+      "refunds",
+      "blocked"
+    ],
+    "due_date": "2026-07-03",
+    "due_date_changes": [
+      "2026-08-14"
+    ],
+    "transitions": [],
+    "comments": [
+      {
+        "author": "Aisha Okonkwo",
+        "body": "The audit trail and the permission checks are done; the call to the provider is stubbed. Cannot finish until the refunds integration is unblocked."
+      }
+    ]
+  },
+  {
+    "project": "ATLAS",
+    "type": "Task",
+    "summary": "Billing event audit log",
+    "description": "Append-only log of every billing decision so a disputed invoice can be explained.\nOwner: Priya Raman.",
+    "owner": "Priya Raman",
+    "priority": "Medium",
+    "labels": [
+      "compliance"
+    ],
+    "due_date": "2026-06-19",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Task",
+    "summary": "Idempotency keys on all charge endpoints",
+    "description": "Every charge endpoint takes an idempotency key so a retried request cannot double-charge.\nOwner: Diego Santos.",
+    "owner": "Diego Santos",
+    "priority": "Highest",
+    "labels": [
+      "reliability"
+    ],
+    "due_date": "2026-06-12",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": [
+      {
+        "author": "Julian Vega",
+        "body": "This one is non-negotiable before any real money moves. Verified in staging with a forced double-submit."
+      }
+    ]
+  },
+  {
+    "project": "ATLAS",
+    "type": "Bug",
+    "summary": "Double charge on retried checkout under network timeout",
+    "description": "A customer whose checkout request timed out and retried was charged twice. Root cause: the retry did not carry the idempotency key.\nOwner: Diego Santos.",
+    "owner": "Diego Santos",
+    "priority": "Highest",
+    "labels": [
+      "reliability",
+      "incident"
+    ],
+    "due_date": "2026-06-10",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": [
+      {
+        "author": "Julian Vega",
+        "body": "Two customers affected, both refunded manually. This is what the idempotency key work is for."
+      },
+      {
+        "author": "Diego Santos",
+        "body": "Client now generates the key before the first attempt and reuses it across retries. Fixed."
+      }
+    ]
+  },
+  {
+    "project": "ATLAS",
+    "type": "Task",
+    "summary": "Launch readiness review for the billing platform",
+    "description": "Go/no-go review covering migration, refunds, tax, and rollback.\nOwner: Marcus Whitfield.",
+    "owner": "Marcus Whitfield",
+    "priority": "Highest",
+    "labels": [
+      "launch-critical"
+    ],
+    "due_date": "2026-06-26",
+    "due_date_changes": [
+      "2026-08-11"
+    ],
+    "transitions": [
+      "In Progress"
+    ],
+    "comments": [
+      {
+        "author": "Marcus Whitfield",
+        "body": "First review was no-go: refunds and chargebacks both blocked on the provider. Rescheduled behind the revised launch date."
+      },
+      {
+        "author": "Fatima Al-Rashid",
+        "body": "Agreed. We are not launching a biller that cannot process a refund."
+      }
+    ]
+  },
+  {
+    "project": "ATLAS",
+    "type": "Bug",
+    "summary": "Currency rounding helper for zero-decimal currencies",
+    "description": "JPY and KRW have no minor unit; the rounding helper must not divide by 100.\nOwner: Aisha Okonkwo.",
+    "owner": "Aisha Okonkwo",
+    "priority": "Medium",
+    "labels": [
+      "invoicing"
+    ],
+    "due_date": "2026-06-05",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Task",
+    "summary": "Webhook delivery retry with exponential backoff",
+    "description": "Outbound webhooks retry for 24 hours before being parked in a dead-letter queue.\nOwner: Julian Vega.",
+    "owner": "Julian Vega",
+    "priority": "Medium",
+    "labels": [
+      "reliability"
+    ],
+    "due_date": "2026-06-19",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Story",
+    "summary": "Admin UI for viewing a customer's billing timeline",
+    "description": "Support-facing read-only timeline of charges, refunds, and plan changes.\nOwner: Lena Fischer.",
+    "owner": "Lena Fischer",
+    "priority": "Medium",
+    "labels": [],
+    "due_date": "2026-07-24",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress"
+    ],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Task",
+    "summary": "Rate limit the public charge endpoint",
+    "description": "Per-key rate limit so a runaway integration cannot exhaust the charge workers.\nOwner: Julian Vega.",
+    "owner": "Julian Vega",
+    "priority": "Medium",
+    "labels": [
+      "reliability"
+    ],
+    "due_date": "2026-06-26",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Task",
+    "summary": "Backfill missing tax jurisdictions on historical invoices",
+    "description": "Older invoices predate jurisdiction capture; backfill from the billing address.\nOwner: Aisha Okonkwo.",
+    "owner": "Aisha Okonkwo",
+    "priority": "Low",
+    "labels": [
+      "tax"
+    ],
+    "due_date": "2026-08-28",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Task",
+    "summary": "Sandbox seeding script for local billing development",
+    "description": "One command to create a customer, a plan, and a paid invoice locally.\nOwner: Diego Santos.",
+    "owner": "Diego Santos",
+    "priority": "Low",
+    "labels": [],
+    "due_date": "2026-06-12",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Task",
+    "summary": "Alert on settlement file arriving late",
+    "description": "Page if the provider's daily settlement file has not landed by 09:00 UTC.\nOwner: Julian Vega.",
+    "owner": "Julian Vega",
+    "priority": "Medium",
+    "labels": [
+      "reliability"
+    ],
+    "due_date": "2026-07-17",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Story",
+    "summary": "Plan catalogue versioning",
+    "description": "Plans are versioned so a customer stays on the terms they signed up under.\nOwner: Priya Raman.",
+    "owner": "Priya Raman",
+    "priority": "High",
+    "labels": [],
+    "due_date": "2026-06-30",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Task",
+    "summary": "Invoice email delivery via the transactional provider",
+    "description": "Send the invoice PDF with a payment link; bounce handling included.\nOwner: Aisha Okonkwo.",
+    "owner": "Aisha Okonkwo",
+    "priority": "Medium",
+    "labels": [
+      "invoicing"
+    ],
+    "due_date": "2026-08-07",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress"
+    ],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Story",
+    "summary": "Credit note support for over-collection",
+    "description": "Issue a credit note rather than a refund when we over-collected on a corrected invoice.\nOwner: Diego Santos.",
+    "owner": "Diego Santos",
+    "priority": "Medium",
+    "labels": [
+      "invoicing"
+    ],
+    "due_date": "2026-08-21",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Task",
+    "summary": "Remove the legacy biller's cron entries after cutover",
+    "description": "Cleanup task, gated on the migration completing.\nOwner: Priya Raman.",
+    "owner": "Priya Raman",
+    "priority": "Low",
+    "labels": [
+      "migration"
+    ],
+    "due_date": "2026-08-28",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Task",
+    "summary": "Load test the charge path at 50 requests per second",
+    "description": "Confirm the charge path holds 50 rps with p99 under 800ms.\nOwner: Julian Vega.",
+    "owner": "Julian Vega",
+    "priority": "High",
+    "labels": [
+      "reliability"
+    ],
+    "due_date": "2026-08-11",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Task",
+    "summary": "Document the billing data model for the support team",
+    "description": "Support needs to read the schema without asking an engineer.\nOwner: Lena Fischer.",
+    "owner": "Lena Fischer",
+    "priority": "Low",
+    "labels": [],
+    "due_date": "2026-08-14",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Story",
+    "summary": "Handle provider outage with a queued-charge fallback",
+    "description": "Queue charges during a provider outage and drain them on recovery.\nOwner: Diego Santos.",
+    "owner": "Diego Santos",
+    "priority": "High",
+    "labels": [
+      "reliability",
+      "provider-dependency"
+    ],
+    "due_date": "2026-08-21",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Bug",
+    "summary": "Stop logging full card BINs in the charge path",
+    "description": "The charge path logged the first six digits. Redact them.\nOwner: Julian Vega.",
+    "owner": "Julian Vega",
+    "priority": "High",
+    "labels": [
+      "security",
+      "compliance"
+    ],
+    "due_date": "2026-06-05",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Story",
+    "summary": "Invoice numbering must be gapless per legal entity",
+    "description": "Several jurisdictions require gapless sequential invoice numbers.\nOwner: Aisha Okonkwo.",
+    "owner": "Aisha Okonkwo",
+    "priority": "High",
+    "labels": [
+      "compliance",
+      "invoicing"
+    ],
+    "due_date": "2026-07-10",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Task",
+    "summary": "Refund partial-amount validation",
+    "description": "Reject a partial refund larger than the remaining refundable balance.\nOwner: Aisha Okonkwo.",
+    "owner": "Aisha Okonkwo",
+    "priority": "Medium",
+    "labels": [
+      "refunds"
+    ],
+    "due_date": "2026-07-31",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress"
+    ],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Task",
+    "summary": "Expose billing metrics to the platform dashboards",
+    "description": "Charge success rate, refund rate, and dunning recovery as metrics.\nOwner: Julian Vega.",
+    "owner": "Julian Vega",
+    "priority": "Low",
+    "labels": [],
+    "due_date": "2026-08-14",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Task",
+    "summary": "Test fixtures for every tax jurisdiction we support",
+    "description": "A fixture per jurisdiction so tax changes are caught by tests.\nOwner: Ethan Brooks.",
+    "owner": "Ethan Brooks",
+    "priority": "Medium",
+    "labels": [
+      "tax"
+    ],
+    "due_date": "2026-08-07",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress"
+    ],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Task",
+    "summary": "Retire the v1 charge endpoint",
+    "description": "No integrations remain on v1; remove it and its tests.\nOwner: Diego Santos.",
+    "owner": "Diego Santos",
+    "priority": "Low",
+    "labels": [],
+    "due_date": "2026-09-04",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Story",
+    "summary": "Customer-facing billing portal skeleton",
+    "description": "Let a customer see invoices and update their payment method without contacting support.\nOwner: Lena Fischer.",
+    "owner": "Lena Fischer",
+    "priority": "Medium",
+    "labels": [],
+    "due_date": "2026-09-11",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Task",
+    "summary": "Alert when dunning recovery rate drops below 40 percent",
+    "description": "A sudden drop usually means a provider-side decline change.\nOwner: Julian Vega.",
+    "owner": "Julian Vega",
+    "priority": "Low",
+    "labels": [
+      "dunning"
+    ],
+    "due_date": "2026-08-28",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Task",
+    "summary": "Reconcile the migration report against the legacy biller totals",
+    "description": "Totals must match to the cent before we decommission the legacy biller.\nOwner: Priya Raman.",
+    "owner": "Priya Raman",
+    "priority": "High",
+    "labels": [
+      "migration"
+    ],
+    "due_date": "2026-08-21",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Story",
+    "summary": "Support annual plans with monthly usage overage",
+    "description": "Annual commitment billed up front, overage billed monthly.\nOwner: Priya Raman.",
+    "owner": "Priya Raman",
+    "priority": "Medium",
+    "labels": [
+      "metered-billing"
+    ],
+    "due_date": "2026-09-04",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Bug",
+    "summary": "Fix flaky proration test on month boundaries",
+    "description": "The test used the wall clock and failed on the 31st.\nOwner: Ethan Brooks.",
+    "owner": "Ethan Brooks",
+    "priority": "Low",
+    "labels": [],
+    "due_date": "2026-07-03",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Task",
+    "summary": "Charge failure reason codes mapped to customer-readable copy",
+    "description": "Turn provider decline codes into something a customer can act on.\nOwner: Lena Fischer.",
+    "owner": "Lena Fischer",
+    "priority": "Medium",
+    "labels": [
+      "dunning"
+    ],
+    "due_date": "2026-08-14",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress"
+    ],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Bug",
+    "summary": "Guard against negative invoice totals",
+    "description": "A large credit could push an invoice negative; clamp and carry the remainder forward.\nOwner: Aisha Okonkwo.",
+    "owner": "Aisha Okonkwo",
+    "priority": "Medium",
+    "labels": [
+      "invoicing"
+    ],
+    "due_date": "2026-07-17",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "ATLAS",
+    "type": "Task",
+    "summary": "Nightly job monitoring dashboard",
+    "description": "One place to see whether each nightly billing job succeeded.\nOwner: Julian Vega.",
+    "owner": "Julian Vega",
+    "priority": "Low",
+    "labels": [],
+    "due_date": "2026-08-28",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Story",
+    "summary": "Freeze the v2 event envelope",
+    "description": "Agree and freeze the v2 event envelope: idempotency key, monotonic sequence, tenant id, and a schema version. Atlas metered billing cannot bill until this is frozen.\nOwner: Tomas Ferreira.",
+    "owner": "Tomas Ferreira",
+    "priority": "Highest",
+    "labels": [
+      "schema",
+      "cross-team",
+      "launch-critical"
+    ],
+    "due_date": "2026-05-29",
+    "due_date_changes": [
+      "2026-06-19",
+      "2026-07-03"
+    ],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": [
+      {
+        "author": "Tomas Ferreira",
+        "body": "Draft is out for review. Atlas needs idempotency keys and a monotonic sequence; both are in."
+      },
+      {
+        "author": "Nadia Haddad",
+        "body": "We cannot freeze before the identity resolution rewrite lands - the rewrite changes what tenant id means for anonymous events."
+      },
+      {
+        "author": "Tomas Ferreira",
+        "body": "Agreed, that is the real ordering constraint. Slipping the freeze behind the rewrite. Atlas has been told."
+      },
+      {
+        "author": "Tomas Ferreira",
+        "body": "Rewrite landed, envelope frozen. Notified Priya."
+      }
+    ]
+  },
+  {
+    "project": "BEACON",
+    "type": "Story",
+    "summary": "Identity resolution rewrite",
+    "description": "Replace the heuristic identity stitching with a deterministic merge on verified identifiers, keeping an audit trail of every merge.\nOwner: Nadia Haddad.",
+    "owner": "Nadia Haddad",
+    "priority": "Highest",
+    "labels": [
+      "identity",
+      "launch-critical"
+    ],
+    "due_date": "2026-05-22",
+    "due_date_changes": [
+      "2026-06-26"
+    ],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": [
+      {
+        "author": "Nadia Haddad",
+        "body": "The heuristic merged two customers who shared an office IP. That is the bug that forced the rewrite."
+      },
+      {
+        "author": "Nadia Haddad",
+        "body": "Deterministic merge is in, with an unmerge path for mistakes. This unblocks the v2 envelope freeze."
+      }
+    ]
+  },
+  {
+    "project": "BEACON",
+    "type": "Task",
+    "summary": "Event ingestion backpressure handling",
+    "description": "Shed load predictably instead of falling over when a customer bursts.\nOwner: Ravi Iyer.\nBLOCKED: waiting on the platform team to raise the Kafka quota.",
+    "owner": "Ravi Iyer",
+    "priority": "High",
+    "labels": [
+      "ingestion",
+      "blocked"
+    ],
+    "due_date": "2026-07-10",
+    "due_date_changes": [
+      "2026-08-07"
+    ],
+    "transitions": [
+      "In Progress"
+    ],
+    "comments": [
+      {
+        "author": "Ravi Iyer",
+        "body": "Backpressure logic is written but I cannot load test it - the test cluster's partition quota is too low to reproduce the burst."
+      },
+      {
+        "author": "Julian Vega",
+        "body": "Quota request is in with the platform vendor. Nothing to do until it is granted."
+      }
+    ]
+  },
+  {
+    "project": "BEACON",
+    "type": "Task",
+    "summary": "Warehouse model for daily active accounts",
+    "description": "dbt model rolling events up to daily active accounts per tenant.\nOwner: Ravi Iyer.",
+    "owner": "Ravi Iyer",
+    "priority": "Medium",
+    "labels": [
+      "warehouse"
+    ],
+    "due_date": "2026-06-12",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Task",
+    "summary": "Deduplicate events on idempotency key at ingest",
+    "description": "Drop duplicates at the edge rather than in the warehouse.\nOwner: Nadia Haddad.",
+    "owner": "Nadia Haddad",
+    "priority": "High",
+    "labels": [
+      "ingestion"
+    ],
+    "due_date": "2026-07-03",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Story",
+    "summary": "Schema registry for event types",
+    "description": "Producers register a schema; incompatible changes are rejected at publish time.\nOwner: Tomas Ferreira.",
+    "owner": "Tomas Ferreira",
+    "priority": "High",
+    "labels": [
+      "schema"
+    ],
+    "due_date": "2026-07-17",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Story",
+    "summary": "Late-arriving event handling in daily rollups",
+    "description": "Reprocess a day's rollup when events arrive after the window closed.\nOwner: Ravi Iyer.",
+    "owner": "Ravi Iyer",
+    "priority": "Medium",
+    "labels": [
+      "warehouse"
+    ],
+    "due_date": "2026-08-07",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress"
+    ],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Task",
+    "summary": "Tenant isolation check on the events API",
+    "description": "A tenant must never read another tenant's events; add a test that proves it.\nOwner: Nadia Haddad.",
+    "owner": "Nadia Haddad",
+    "priority": "Highest",
+    "labels": [
+      "security"
+    ],
+    "due_date": "2026-06-05",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Task",
+    "summary": "Retire the v1 event envelope",
+    "description": "Once all producers are on v2, remove v1 handling.\nOwner: Tomas Ferreira.",
+    "owner": "Tomas Ferreira",
+    "priority": "Low",
+    "labels": [
+      "schema"
+    ],
+    "due_date": "2026-09-11",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Task",
+    "summary": "Backfill six months of events into the new identity graph",
+    "description": "Rebuild the identity graph over historical events after the rewrite.\nOwner: Nadia Haddad.",
+    "owner": "Nadia Haddad",
+    "priority": "High",
+    "labels": [
+      "identity"
+    ],
+    "due_date": "2026-07-24",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Task",
+    "summary": "Ingestion lag dashboard",
+    "description": "Show end-to-end lag from publish to queryable, per tenant.\nOwner: Ravi Iyer.",
+    "owner": "Ravi Iyer",
+    "priority": "Medium",
+    "labels": [
+      "ingestion"
+    ],
+    "due_date": "2026-07-10",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Task",
+    "summary": "Cost attribution for warehouse queries",
+    "description": "Attribute warehouse spend to the team that ran the query.\nOwner: Grace Lin.",
+    "owner": "Grace Lin",
+    "priority": "Low",
+    "labels": [
+      "warehouse"
+    ],
+    "due_date": "2026-08-28",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Bug",
+    "summary": "Fix double-counted sessions across midnight UTC",
+    "description": "A session spanning midnight was counted in both days.\nOwner: Ravi Iyer.",
+    "owner": "Ravi Iyer",
+    "priority": "Medium",
+    "labels": [
+      "warehouse"
+    ],
+    "due_date": "2026-06-26",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Story",
+    "summary": "Consent flags on event ingestion",
+    "description": "Respect per-tenant consent settings at ingest, not at query time.\nOwner: Nadia Haddad.",
+    "owner": "Nadia Haddad",
+    "priority": "High",
+    "labels": [
+      "compliance"
+    ],
+    "due_date": "2026-08-14",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress"
+    ],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Task",
+    "summary": "Replay tooling for a single tenant",
+    "description": "Replay one tenant's events without touching anyone else's data.\nOwner: Tomas Ferreira.",
+    "owner": "Tomas Ferreira",
+    "priority": "Medium",
+    "labels": [
+      "ingestion"
+    ],
+    "due_date": "2026-08-21",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Task",
+    "summary": "Document the v2 envelope for downstream teams",
+    "description": "Atlas and Comet both consume it; write it down once.\nOwner: Grace Lin.",
+    "owner": "Grace Lin",
+    "priority": "Medium",
+    "labels": [
+      "schema",
+      "cross-team"
+    ],
+    "due_date": "2026-07-17",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Task",
+    "summary": "Alert on schema rejection rate spike",
+    "description": "A spike means a producer shipped an incompatible change.\nOwner: Julian Vega.",
+    "owner": "Julian Vega",
+    "priority": "Low",
+    "labels": [
+      "schema"
+    ],
+    "due_date": "2026-08-07",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress"
+    ],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Task",
+    "summary": "Partition the events table by month",
+    "description": "Query performance is degrading as the table grows.\nOwner: Ravi Iyer.",
+    "owner": "Ravi Iyer",
+    "priority": "Medium",
+    "labels": [
+      "warehouse"
+    ],
+    "due_date": "2026-08-28",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Task",
+    "summary": "Identity merge audit trail export",
+    "description": "Support needs to explain to a customer why two accounts merged.\nOwner: Nadia Haddad.",
+    "owner": "Nadia Haddad",
+    "priority": "Medium",
+    "labels": [
+      "identity"
+    ],
+    "due_date": "2026-08-21",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Bug",
+    "summary": "Reject events with timestamps more than 48 hours in the future",
+    "description": "A misconfigured client sent events dated 2031.\nOwner: Ravi Iyer.",
+    "owner": "Ravi Iyer",
+    "priority": "Medium",
+    "labels": [
+      "ingestion"
+    ],
+    "due_date": "2026-07-03",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Task",
+    "summary": "Sampling for high-volume debug events",
+    "description": "Sample debug-level events rather than storing all of them.\nOwner: Tomas Ferreira.",
+    "owner": "Tomas Ferreira",
+    "priority": "Low",
+    "labels": [
+      "ingestion"
+    ],
+    "due_date": "2026-09-04",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Task",
+    "summary": "Warehouse model for feature adoption",
+    "description": "Which accounts use which features, weekly.\nOwner: Grace Lin.",
+    "owner": "Grace Lin",
+    "priority": "Low",
+    "labels": [
+      "warehouse"
+    ],
+    "due_date": "2026-08-14",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Task",
+    "summary": "Test harness for envelope compatibility",
+    "description": "Prove a schema change is backward compatible before it ships.\nOwner: Ethan Brooks.",
+    "owner": "Ethan Brooks",
+    "priority": "Medium",
+    "labels": [
+      "schema"
+    ],
+    "due_date": "2026-07-31",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Task",
+    "summary": "Move ingestion secrets into the platform secret store",
+    "description": "They are currently in environment variables on the ingest hosts.\nOwner: Julian Vega.",
+    "owner": "Julian Vega",
+    "priority": "High",
+    "labels": [
+      "security"
+    ],
+    "due_date": "2026-06-19",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Story",
+    "summary": "Per-tenant ingestion quotas",
+    "description": "Prevent one tenant from consuming the whole ingest budget.\nOwner: Ravi Iyer.",
+    "owner": "Ravi Iyer",
+    "priority": "Medium",
+    "labels": [
+      "ingestion"
+    ],
+    "due_date": "2026-08-28",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Bug",
+    "summary": "Fix identity graph memory growth under high merge rates",
+    "description": "The merge cache was unbounded.\nOwner: Nadia Haddad.",
+    "owner": "Nadia Haddad",
+    "priority": "High",
+    "labels": [
+      "identity"
+    ],
+    "due_date": "2026-07-10",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Task",
+    "summary": "Warehouse freshness SLO and alerting",
+    "description": "Define and alert on a freshness target for the core models.\nOwner: Tomas Ferreira.",
+    "owner": "Tomas Ferreira",
+    "priority": "Medium",
+    "labels": [
+      "warehouse"
+    ],
+    "due_date": "2026-08-07",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress"
+    ],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Task",
+    "summary": "Deprecate the legacy identity stitching code path",
+    "description": "Remove it once the backfill is verified.\nOwner: Nadia Haddad.",
+    "owner": "Nadia Haddad",
+    "priority": "Low",
+    "labels": [
+      "identity"
+    ],
+    "due_date": "2026-09-11",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Story",
+    "summary": "Ingest client library for Go services",
+    "description": "A shared client so every service publishes the envelope correctly.\nOwner: Tomas Ferreira.",
+    "owner": "Tomas Ferreira",
+    "priority": "Medium",
+    "labels": [
+      "schema"
+    ],
+    "due_date": "2026-08-21",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "BEACON",
+    "type": "Story",
+    "summary": "Handle tenant deletion across the warehouse",
+    "description": "A deletion request has to remove the tenant from every model.\nOwner: Nadia Haddad.",
+    "owner": "Nadia Haddad",
+    "priority": "High",
+    "labels": [
+      "compliance"
+    ],
+    "due_date": "2026-09-04",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "COMET",
+    "type": "Story",
+    "summary": "In-app plan management screens",
+    "description": "Let a customer view and change their plan in the app. Reads the Atlas billing API.\nOwner: Oskar Nowak.\nBLOCKED: waiting on the Atlas customer-facing billing portal API, which is behind the billing launch.",
+    "owner": "Oskar Nowak",
+    "priority": "High",
+    "labels": [
+      "billing-integration",
+      "blocked",
+      "cross-team"
+    ],
+    "due_date": "2026-07-24",
+    "due_date_changes": [
+      "2026-09-04"
+    ],
+    "transitions": [
+      "In Progress"
+    ],
+    "comments": [
+      {
+        "author": "Oskar Nowak",
+        "body": "Screens are built against a mock. We cannot ship them until Atlas exposes the plan-change endpoint."
+      },
+      {
+        "author": "Lena Fischer",
+        "body": "That endpoint is part of the billing portal work, which sits behind the revised 14 August launch. Comet should plan for September."
+      }
+    ]
+  },
+  {
+    "project": "COMET",
+    "type": "Story",
+    "summary": "Push notification delivery for threshold alerts",
+    "description": "Deliver alert notifications on iOS and Android with a deep link to the dashboard.\nOwner: Yuki Tanaka.",
+    "owner": "Yuki Tanaka",
+    "priority": "High",
+    "labels": [
+      "alerts"
+    ],
+    "due_date": "2026-06-26",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "COMET",
+    "type": "Story",
+    "summary": "Offline dashboard caching",
+    "description": "Show the last fetched dashboard when the device is offline.\nOwner: Sofia Moreau.",
+    "owner": "Sofia Moreau",
+    "priority": "Medium",
+    "labels": [],
+    "due_date": "2026-07-17",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "COMET",
+    "type": "Task",
+    "summary": "Biometric app lock",
+    "description": "Face ID and fingerprint unlock for the app.\nOwner: Yuki Tanaka.",
+    "owner": "Yuki Tanaka",
+    "priority": "Medium",
+    "labels": [
+      "security"
+    ],
+    "due_date": "2026-07-03",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "COMET",
+    "type": "Bug",
+    "summary": "Fix chart rendering crash on very small tenants",
+    "description": "A tenant with a single data point crashed the chart library.\nOwner: Sofia Moreau.",
+    "owner": "Sofia Moreau",
+    "priority": "High",
+    "labels": [],
+    "due_date": "2026-06-12",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "COMET",
+    "type": "Task",
+    "summary": "Dark mode across all screens",
+    "description": "Full dark mode support, including charts.\nOwner: Sofia Moreau.",
+    "owner": "Sofia Moreau",
+    "priority": "Low",
+    "labels": [],
+    "due_date": "2026-08-14",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress"
+    ],
+    "comments": []
+  },
+  {
+    "project": "COMET",
+    "type": "Task",
+    "summary": "Migrate to the v2 event envelope for in-app analytics",
+    "description": "Comet publishes usage events; move to the frozen v2 envelope.\nOwner: Oskar Nowak.",
+    "owner": "Oskar Nowak",
+    "priority": "Medium",
+    "labels": [
+      "cross-team"
+    ],
+    "due_date": "2026-07-31",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "COMET",
+    "type": "Task",
+    "summary": "Reduce cold start time below 1.5 seconds",
+    "description": "Cold start is 2.4 seconds on a mid-range Android device.\nOwner: Sofia Moreau.",
+    "owner": "Sofia Moreau",
+    "priority": "Medium",
+    "labels": [
+      "performance"
+    ],
+    "due_date": "2026-08-07",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress"
+    ],
+    "comments": []
+  },
+  {
+    "project": "COMET",
+    "type": "Story",
+    "summary": "Accessibility audit and fixes",
+    "description": "Screen reader labels, contrast, and touch target sizes.\nOwner: Yuki Tanaka.",
+    "owner": "Yuki Tanaka",
+    "priority": "Medium",
+    "labels": [
+      "accessibility"
+    ],
+    "due_date": "2026-08-21",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "COMET",
+    "type": "Task",
+    "summary": "Crash-free session rate reporting",
+    "description": "Track crash-free sessions per release.\nOwner: Oskar Nowak.",
+    "owner": "Oskar Nowak",
+    "priority": "Low",
+    "labels": [],
+    "due_date": "2026-07-10",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "COMET",
+    "type": "Story",
+    "summary": "Alert threshold editor",
+    "description": "Let a customer set and edit alert thresholds in the app.\nOwner: Yuki Tanaka.",
+    "owner": "Yuki Tanaka",
+    "priority": "High",
+    "labels": [
+      "alerts"
+    ],
+    "due_date": "2026-08-07",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress"
+    ],
+    "comments": []
+  },
+  {
+    "project": "COMET",
+    "type": "Bug",
+    "summary": "Fix notification permission prompt appearing on every launch",
+    "description": "The prompt re-asked after a denial.\nOwner: Sofia Moreau.",
+    "owner": "Sofia Moreau",
+    "priority": "Medium",
+    "labels": [
+      "alerts"
+    ],
+    "due_date": "2026-06-19",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "COMET",
+    "type": "Task",
+    "summary": "Tablet layout for the dashboard",
+    "description": "Use the extra width rather than stretching the phone layout.\nOwner: Sofia Moreau.",
+    "owner": "Sofia Moreau",
+    "priority": "Low",
+    "labels": [],
+    "due_date": "2026-09-04",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "COMET",
+    "type": "Task",
+    "summary": "Deep links from email into the app",
+    "description": "An alert email should open the relevant dashboard.\nOwner: Yuki Tanaka.",
+    "owner": "Yuki Tanaka",
+    "priority": "Medium",
+    "labels": [
+      "alerts"
+    ],
+    "due_date": "2026-08-14",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "COMET",
+    "type": "Task",
+    "summary": "Remove the deprecated analytics SDK",
+    "description": "It duplicates our own event publishing and adds 1.2MB.\nOwner: Oskar Nowak.",
+    "owner": "Oskar Nowak",
+    "priority": "Low",
+    "labels": [
+      "performance"
+    ],
+    "due_date": "2026-08-28",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "COMET",
+    "type": "Story",
+    "summary": "Localise the app into German and Japanese",
+    "description": "Our two largest non-English markets.\nOwner: Yuki Tanaka.",
+    "owner": "Yuki Tanaka",
+    "priority": "Medium",
+    "labels": [],
+    "due_date": "2026-09-11",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "COMET",
+    "type": "Bug",
+    "summary": "Fix stale token causing silent sign-out",
+    "description": "An expired refresh token logged the user out without a message.\nOwner: Yuki Tanaka.",
+    "owner": "Yuki Tanaka",
+    "priority": "High",
+    "labels": [
+      "security"
+    ],
+    "due_date": "2026-06-26",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "COMET",
+    "type": "Story",
+    "summary": "Onboarding tour for first-run users",
+    "description": "Three-screen tour explaining dashboards, alerts, and plans.\nOwner: Oskar Nowak.",
+    "owner": "Oskar Nowak",
+    "priority": "Low",
+    "labels": [],
+    "due_date": "2026-08-28",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "COMET",
+    "type": "Task",
+    "summary": "Automated UI tests for the alerts flow",
+    "description": "The alerts flow regressed twice; cover it.\nOwner: Ethan Brooks.",
+    "owner": "Ethan Brooks",
+    "priority": "Medium",
+    "labels": [
+      "alerts"
+    ],
+    "due_date": "2026-07-24",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "COMET",
+    "type": "Task",
+    "summary": "Reduce API calls on dashboard refresh",
+    "description": "The dashboard made eleven calls; batch them.\nOwner: Sofia Moreau.",
+    "owner": "Sofia Moreau",
+    "priority": "Medium",
+    "labels": [
+      "performance"
+    ],
+    "due_date": "2026-08-21",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "COMET",
+    "type": "Task",
+    "summary": "Handle billing API unavailability gracefully",
+    "description": "Show a clear message rather than an empty screen when billing is down.\nOwner: Oskar Nowak.",
+    "owner": "Oskar Nowak",
+    "priority": "Medium",
+    "labels": [
+      "billing-integration"
+    ],
+    "due_date": "2026-09-04",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "COMET",
+    "type": "Task",
+    "summary": "App store screenshots for the new dashboard",
+    "description": "Refresh the store listing after the dashboard redesign.\nOwner: Oskar Nowak.",
+    "owner": "Oskar Nowak",
+    "priority": "Low",
+    "labels": [],
+    "due_date": "2026-08-14",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress"
+    ],
+    "comments": []
+  },
+  {
+    "project": "COMET",
+    "type": "Bug",
+    "summary": "Fix Android back button dismissing the whole app from alerts",
+    "description": "Back from a deep-linked alert exited instead of returning to the list.\nOwner: Sofia Moreau.",
+    "owner": "Sofia Moreau",
+    "priority": "Medium",
+    "labels": [
+      "alerts"
+    ],
+    "due_date": "2026-07-17",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  },
+  {
+    "project": "COMET",
+    "type": "Story",
+    "summary": "Per-release feature flag support in the app",
+    "description": "Roll a feature out to a percentage of users.\nOwner: Oskar Nowak.",
+    "owner": "Oskar Nowak",
+    "priority": "Medium",
+    "labels": [],
+    "due_date": "2026-08-28",
+    "due_date_changes": [],
+    "transitions": [],
+    "comments": []
+  },
+  {
+    "project": "COMET",
+    "type": "Task",
+    "summary": "Reduce battery use from background alert polling",
+    "description": "Polling every two minutes drained battery; move to push only.\nOwner: Yuki Tanaka.",
+    "owner": "Yuki Tanaka",
+    "priority": "High",
+    "labels": [
+      "performance",
+      "alerts"
+    ],
+    "due_date": "2026-07-31",
+    "due_date_changes": [],
+    "transitions": [
+      "In Progress",
+      "Done"
+    ],
+    "comments": []
+  }
+]

@@ -11,26 +11,45 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"cortex/internal/llm"
+	"cortex/internal/store"
 )
 
 // DB is the subset of *pgxpool.Pool the API needs. Declaring it here — rather
 // than importing the concrete pool type into every handler — keeps the
 // handlers honest about what they use and swappable in tests.
+//
+// store.DBTX is embedded so a read-only handler can query through the pool
+// directly instead of opening a transaction it has no reason to hold.
 type DB interface {
+	store.DBTX
+
 	Begin(ctx context.Context) (pgx.Tx, error)
 	Ping(ctx context.Context) error
 }
 
+// Enqueuer submits work to the job queue.
+//
+// It takes the transaction so the enqueue commits with the caller's inserts —
+// that is what makes POST /api/chat atomic. Declared here as an interface rather
+// than depending on internal/jobs so River stays out of the HTTP layer, and so
+// the rollback path can be exercised with a fake that just returns an error.
+type Enqueuer interface {
+	EnqueueAgentRun(ctx context.Context, tx pgx.Tx, runID uuid.UUID) error
+}
+
 // Deps are the collaborators the handlers need.
+//
+// There is no LLM provider here any more: since Day 2 the handlers only record
+// and report on runs, and every model call happens in the River worker.
 type Deps struct {
 	// DB is the connection pool used for queries and transactions.
 	DB DB
-	// Provider is the LLM backend.
-	Provider llm.Provider
-	// Model is the model name recorded on runs and LLM calls.
+	// Enqueuer queues agent runs.
+	Enqueuer Enqueuer
+	// Model is the model name recorded on runs.
 	Model string
 	// DevUserEmail identifies the single hardcoded user; real auth lands later.
 	DevUserEmail string
@@ -53,11 +72,13 @@ func NewRouter(deps Deps) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(requestLogger(deps.Logger))
+	r.Use(hostCheck(deps.Logger))
 	r.Use(middleware.Recoverer)
 
 	r.Get("/healthz", s.handleHealthz)
 	r.Route("/api", func(r chi.Router) {
 		r.Post("/chat", s.handleChat)
+		r.Get("/runs/{id}", s.handleGetRun)
 	})
 	return r
 }

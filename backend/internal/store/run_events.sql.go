@@ -42,3 +42,38 @@ func (q *Queries) InsertRunEvent(ctx context.Context, arg InsertRunEventParams) 
 	)
 	return i, err
 }
+
+const listRunEventsByRun = `-- name: ListRunEventsByRun :many
+SELECT id, agent_run_id, seq, type, payload, created_at FROM run_events
+WHERE agent_run_id = $1
+ORDER BY seq
+`
+
+// Ordered by seq, not created_at: two events written inside one transaction can
+// share a timestamp, and the transcript's order is the thing being replayed.
+func (q *Queries) ListRunEventsByRun(ctx context.Context, agentRunID uuid.UUID) ([]RunEvent, error) {
+	rows, err := q.db.Query(ctx, listRunEventsByRun, agentRunID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RunEvent{}
+	for rows.Next() {
+		var i RunEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentRunID,
+			&i.Seq,
+			&i.Type,
+			&i.Payload,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

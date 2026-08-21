@@ -1,0 +1,63 @@
+{
+  "id": "10101",
+  "key": "ATLAS-101",
+  "fields": {
+    "summary": "Checkout fails on expired payment tokens",
+    "description": {
+      "type": "doc",
+      "version": 1,
+      "content": [
+        {
+          "type": "heading",
+          "attrs": { "level": 2 },
+          "content": [{ "type": "text", "text": "Problem" }]
+        },
+        {
+          "type": "paragraph",
+          "content": [
+            { "type": "text", "text": "Checkout returns a 500 when the stored token has expired. Owner: " },
+            { "type": "mention", "attrs": { "id": "5b10a2", "text": "@Priya Raman" } },
+            { "type": "text", "text": "." }
+          ]
+        },
+        {
+          "type": "bulletList",
+          "content": [
+            {
+              "type": "listItem",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [{ "type": "text", "text": "Blocked on the vendor sandbox (see ATLAS-102)" }]
+                }
+              ]
+            },
+            {
+              "type": "listItem",
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    { "type": "text", "text": "Runbook", "marks": [{ "type": "link", "attrs": { "href": "https://wiki.example.com/runbook" } }] }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "status": { "name": "Blocked" },
+    "priority": { "name": "High" },
+    "issuetype": { "name": "Bug" },
+    "resolution": null,
+    "assignee": { "accountId": "5b10a2", "displayName": "Priya Raman" },
+    "reporter": { "accountId": "5b10b9", "displayName": "Dev Account" },
+    "project": { "id": "10000", "key": "ATLAS", "name": "Atlas" },
+    "parent": { "key": "ATLAS-90", "fields": { "summary": "Payments hardening" } },
+    "duedate": "2026-07-31",
+    "created": "2026-05-02T09:00:00.000+0000",
+    "updated": "2026-06-12T10:31:02.000+0000",
+    "labels": ["owner-priya-raman", "blocked"]
+  }
+}

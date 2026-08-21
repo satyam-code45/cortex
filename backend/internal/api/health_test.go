@@ -26,14 +26,14 @@ func TestHealthz(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			h := api.NewRouter(api.Deps{
 				DB:           &stubDB{pingErr: tt.pingErr},
-				Provider:     &stubProvider{},
+				Enqueuer:     &stubEnqueuer{},
 				Model:        testModel,
 				DevUserEmail: devUserEmail,
 				Logger:       discardLogger(),
 			})
 
 			rec := httptest.NewRecorder()
-			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+			h.ServeHTTP(rec, localRequest(http.MethodGet, "/healthz", nil))
 
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d (body %q)", rec.Code, tt.wantStatus, rec.Body.String())
@@ -55,10 +55,10 @@ func TestHealthz(t *testing.T) {
 // NewRouter must tolerate a nil logger (REQ-1.6 wiring); it falls back to the
 // default slog logger rather than panicking on the first request.
 func TestNewRouterWithNilLogger(t *testing.T) {
-	h := api.NewRouter(api.Deps{DB: &stubDB{}, Provider: &stubProvider{}, Model: testModel, DevUserEmail: devUserEmail})
+	h := api.NewRouter(api.Deps{DB: &stubDB{}, Enqueuer: &stubEnqueuer{}, Model: testModel, DevUserEmail: devUserEmail})
 
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	h.ServeHTTP(rec, localRequest(http.MethodGet, "/healthz", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)

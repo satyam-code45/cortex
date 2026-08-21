@@ -1,0 +1,54 @@
+{
+  "startAt": 0,
+  "maxResults": 50,
+  "total": 2,
+  "comments": [
+    {
+      "id": "70001",
+      "author": { "accountId": "5b10a2", "displayName": "Priya Raman" },
+      "created": "2026-05-28T16:20:05.000+0000",
+      "updated": "2026-05-28T16:20:05.000+0000",
+      "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              { "type": "text", "text": "We cannot test the fix: the vendor has not issued sandbox credentials." }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "70002",
+      "author": { "accountId": "5b10b9", "displayName": "Dev Account" },
+      "created": "2026-06-11T09:02:00.000+0000",
+      "updated": "2026-06-11T09:02:00.000+0000",
+      "body": {
+        "type": "doc",
+        "version": 1,
+        "content": [
+          {
+            "type": "paragraph",
+            "content": [
+              { "type": "text", "text": "Escalated to procurement. Due date moved to 2026-07-31 as a result." }
+            ]
+          },
+          {
+            "type": "bulletList",
+            "content": [
+              {
+                "type": "listItem",
+                "content": [
+                  { "type": "paragraph", "content": [{ "type": "text", "text": "Root cause: expired vendor contract" }] }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
