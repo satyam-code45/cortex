@@ -1,0 +1,72 @@
+{
+  "id": "18f2a3b4c5d6e7f8",
+  "threadId": "18f2a3b4c5d6e7f8",
+  "labelIds": [
+    "INBOX",
+    "Label_7"
+  ],
+  "snippet": "Nordwind Payments: the v3 refunds sandbox will not be available until 2026-07-15.",
+  "internalDate": "1781255640000",
+  "payload": {
+    "partId": "",
+    "mimeType": "multipart/alternative",
+    "filename": "",
+    "headers": [
+      {
+        "name": "From",
+        "value": "Ana Vogt <ana.vogt@nordwind.example>"
+      },
+      {
+        "name": "To",
+        "value": "priya.raman@vantagelabs.test"
+      },
+      {
+        "name": "Subject",
+        "value": "Nordwind v3 refunds sandbox: revised availability"
+      },
+      {
+        "name": "Date",
+        "value": "Fri, 12 Jun 2026 09:14:00 +0000"
+      },
+      {
+        "name": "Message-ID",
+        "value": "<CA+nordwind-2026-06-12@mail.nordwind.example>"
+      }
+    ],
+    "body": {
+      "size": 0
+    },
+    "parts": [
+      {
+        "partId": "0",
+        "mimeType": "text/plain",
+        "filename": "",
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": "text/plain; charset=UTF-8"
+          }
+        ],
+        "body": {
+          "size": 213,
+          "data": "SGkgUHJpeWEsDQoNClRoZSB2MyByZWZ1bmRzIHNhbmRib3ggd2lsbCBub3QgYmUgYXZhaWxhYmxlIHVudGlsIDIwMjYtMDctMTUuIE91ciBjZXJ0aWZpY2F0aW9uIHBhcnRuZXIgZGVsYXllZCB0aGUgUENJIHJlLWF1ZGl0LCBzbyB0aGUgcmVmdW5kcyBlbmRwb2ludHMgc3RheSBiZWhpbmQgdGhlIGZsYWcgdW50aWwgdGhlbi4NCg0KQW5hDQpOb3Jkd2luZCBQYXltZW50cw0K"
+        }
+      },
+      {
+        "partId": "1",
+        "mimeType": "text/html",
+        "filename": "",
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": "text/html; charset=UTF-8"
+          }
+        ],
+        "body": {
+          "size": 186,
+          "data": "PGh0bWw-PGhlYWQ-PHN0eWxlPnB7bWFyZ2luOjB9PC9zdHlsZT48L2hlYWQ-PGJvZHk-PHA-SGkgUHJpeWEsPC9wPjxwPlRoZSB2MyByZWZ1bmRzIHNhbmRib3ggd2lsbCBub3QgYmUgYXZhaWxhYmxlIHVudGlsIDIwMjYtMDctMTUuPC9wPjxwPkFuYSAmbWRhc2g7IE5vcmR3aW5kIFBheW1lbnRzPC9wPjwvYm9keT48L2h0bWw-"
+        }
+      }
+    ]
+  }
+}

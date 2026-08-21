@@ -1,0 +1,33 @@
+{
+  "id": "18f2a3b4c5d6e7f9",
+  "threadId": "18f2a3b4c5d6e7f8",
+  "labelIds": [
+    "INBOX",
+    "Label_7"
+  ],
+  "snippet": "Re: launch date \u2014 we move Atlas launch to 2026-08-14 given the sandbox slip.",
+  "internalDate": "1781541600000",
+  "payload": {
+    "partId": "",
+    "mimeType": "text/plain",
+    "filename": "",
+    "headers": [
+      {
+        "name": "From",
+        "value": "Priya Raman <priya.raman@vantagelabs.test>"
+      },
+      {
+        "name": "To",
+        "value": "ana.vogt@nordwind.example"
+      },
+      {
+        "name": "Subject",
+        "value": "Re: Nordwind v3 refunds sandbox: revised availability"
+      },
+      {
+        "name": "Date",
+        "value": "Mon, 15 Jun 2026 16:40:00 +0000"
+      }
+    ]
+  }
+}

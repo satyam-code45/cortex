@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -30,6 +31,12 @@ const (
 	// DefaultAgentRunWorkers is how many agent runs execute concurrently in the
 	// server process.
 	DefaultAgentRunWorkers = 4
+
+	// DefaultGmailCredentialsPath is where the OAuth Desktop client JSON is
+	// expected, relative to the repository root.
+	DefaultGmailCredentialsPath = "./gmail-credentials.json"
+	// DefaultGmailTokenPath is where cmd/gmail-auth caches the refresh token.
+	DefaultGmailTokenPath = "./.gmail-token.json"
 )
 
 // Config holds every setting the server needs. Fields map 1:1 to the variables
@@ -66,6 +73,27 @@ type Config struct {
 	JiraEmail string
 	// JiraAPIToken authenticates against the Jira REST API.
 	JiraAPIToken string
+
+	// NotionToken is the internal integration secret.
+	NotionToken string
+	// NotionParentPageID is the page the seeder creates fixture pages under.
+	// Empty means "discover it", which works when exactly one page is shared
+	// with the integration.
+	NotionParentPageID string
+
+	// GmailCredentialsPath points at the OAuth Desktop client JSON downloaded
+	// from Google Cloud.
+	GmailCredentialsPath string
+	// GmailTokenPath is where cmd/gmail-auth cached the refresh token.
+	GmailTokenPath string
+	// GmailQueryScope, when set, is ANDed into every Gmail search.
+	//
+	// Empty - the default - means the agent searches the whole mailbox, which
+	// is Cortex working as intended: it is a system that reads live sources.
+	// Setting it to a label (e.g. `label:vantage-labs`) confines the agent to
+	// the seeded fixtures, which is what makes a graded eval run reproducible
+	// and keeps personal mail out of a scored answer.
+	GmailQueryScope string
 }
 
 // String renders the configuration with its secrets redacted.
@@ -78,10 +106,13 @@ type Config struct {
 func (c Config) String() string {
 	return fmt.Sprintf("Config{DatabaseURL:%s Host:%s Port:%s "+
 		"OpenAIAPIKey:%s OpenAIBaseURL:%s LLMModel:%s LLMUtilityModel:%s EmbeddingModel:%s "+
-		"MaxIterations:%d AgentRunWorkers:%d JiraBaseURL:%s JiraEmail:%s JiraAPIToken:%s}",
+		"MaxIterations:%d AgentRunWorkers:%d JiraBaseURL:%s JiraEmail:%s JiraAPIToken:%s "+
+		"NotionToken:%s NotionParentPageID:%s GmailCredentialsPath:%s GmailTokenPath:%s GmailQueryScope:%s}",
 		redactDSN(c.DatabaseURL), c.Host, c.Port,
 		redact(c.OpenAIAPIKey), c.OpenAIBaseURL, c.LLMModel, c.LLMUtilityModel, c.EmbeddingModel,
-		c.MaxIterations, c.AgentRunWorkers, c.JiraBaseURL, c.JiraEmail, redact(c.JiraAPIToken))
+		c.MaxIterations, c.AgentRunWorkers, c.JiraBaseURL, c.JiraEmail, redact(c.JiraAPIToken),
+		redact(c.NotionToken), c.NotionParentPageID,
+		c.GmailCredentialsPath, c.GmailTokenPath, c.GmailQueryScope)
 }
 
 // redactDSN strips the password from a Postgres connection string.
@@ -132,6 +163,13 @@ func Load() (*Config, error) {
 		JiraBaseURL:  strings.TrimRight(os.Getenv("JIRA_BASE_URL"), "/"),
 		JiraEmail:    os.Getenv("JIRA_EMAIL"),
 		JiraAPIToken: os.Getenv("JIRA_API_TOKEN"),
+
+		NotionToken:        os.Getenv("NOTION_TOKEN"),
+		NotionParentPageID: strings.TrimSpace(os.Getenv("NOTION_PARENT_PAGE_ID")),
+
+		GmailCredentialsPath: RepoPath(envOr("GMAIL_CREDENTIALS_JSON", DefaultGmailCredentialsPath)),
+		GmailTokenPath:       RepoPath(envOr("GMAIL_TOKEN_PATH", DefaultGmailTokenPath)),
+		GmailQueryScope:      strings.TrimSpace(os.Getenv("GMAIL_QUERY_SCOPE")),
 	}
 
 	var missing []string
@@ -153,11 +191,55 @@ func Load() (*Config, error) {
 	if cfg.JiraAPIToken == "" {
 		missing = append(missing, "JIRA_API_TOKEN")
 	}
+	// Notion and Gmail are required for the same reason Jira is: from Day 3 the
+	// agent investigates across all three, and a server missing one of them
+	// cannot answer a multi-hop question. It would still answer - badly, and
+	// without ever saying which source it could not reach - which is far worse
+	// than refusing to start.
+	if cfg.NotionToken == "" {
+		missing = append(missing, "NOTION_TOKEN")
+	}
+	// GMAIL_CREDENTIALS_JSON is not checked for emptiness: it has a default, so
+	// it is never empty. What matters is whether the file is there, and that is
+	// checked where it is read — cmd/server fails at startup naming the file,
+	// and cmd/gmail-auth names it too.
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("config: missing required environment variables: %s", strings.Join(missing, ", "))
 	}
 
 	return cfg, nil
+}
+
+// RepoPath resolves a relative path against the repository root rather than the
+// working directory.
+//
+// Every make target runs the Go commands from backend/, but the credential
+// files and .env itself live at the repository root — so "./gmail-credentials.json",
+// which is what a person writing .env at the root means, would otherwise resolve
+// to backend/gmail-credentials.json and not be found. The root is located by
+// walking up for the .git directory; when that fails the path is returned
+// unchanged, so an unusual layout degrades to the old behaviour rather than to a
+// wrong absolute path.
+//
+// Absolute paths are returned untouched.
+func RepoPath(path string) string {
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	dir, err := os.Getwd()
+	if err != nil {
+		return path
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return filepath.Join(dir, filepath.Clean(path))
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return path
+		}
+		dir = parent
+	}
 }
 
 // envOr returns the value of key, or def when the variable is unset or empty.

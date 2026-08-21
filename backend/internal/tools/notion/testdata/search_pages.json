@@ -1,0 +1,61 @@
+{
+  "object": "list",
+  "results": [
+    {
+      "object": "page",
+      "id": "3c34fab1-2b9b-80d6-8cfb-c64d5b8cebe0",
+      "created_time": "2026-04-02T09:15:00.000Z",
+      "last_edited_time": "2026-06-18T14:22:31.000Z",
+      "url": "https://www.notion.so/Atlas-Q2-Plan-3c34fab12b9b80d68cfbc64d5b8cebe0",
+      "in_trash": false,
+      "parent": { "type": "page_id", "page_id": "11112222-3333-4444-5555-666677778888" },
+      "properties": {
+        "title": {
+          "id": "title",
+          "type": "title",
+          "title": [
+            { "type": "text", "plain_text": "Atlas Q2 Plan", "href": null, "annotations": {} }
+          ]
+        }
+      }
+    },
+    {
+      "object": "page",
+      "id": "7d21ee90-4f11-4c33-a2b7-9c0a1d5e2f88",
+      "created_time": "2026-05-11T11:02:00.000Z",
+      "last_edited_time": "2026-06-02T08:00:00.000Z",
+      "url": "https://www.notion.so/Atlas-Retro-7d21ee904f114c33a2b79c0a1d5e2f88",
+      "in_trash": false,
+      "parent": { "type": "page_id", "page_id": "11112222-3333-4444-5555-666677778888" },
+      "properties": {
+        "title": {
+          "id": "title",
+          "type": "title",
+          "title": [
+            { "type": "text", "plain_text": "Atlas Retro — June", "href": null, "annotations": {} }
+          ]
+        }
+      }
+    },
+    {
+      "object": "page",
+      "id": "9999aaaa-bbbb-cccc-dddd-eeeeffff0000",
+      "created_time": "2026-01-05T09:00:00.000Z",
+      "last_edited_time": "2026-01-06T09:00:00.000Z",
+      "url": "https://www.notion.so/Deleted-Draft-9999aaaabbbbccccddddeeeeffff0000",
+      "in_trash": true,
+      "parent": { "type": "page_id", "page_id": "11112222-3333-4444-5555-666677778888" },
+      "properties": {
+        "title": {
+          "id": "title",
+          "type": "title",
+          "title": [
+            { "type": "text", "plain_text": "Deleted Draft", "href": null, "annotations": {} }
+          ]
+        }
+      }
+    }
+  ],
+  "next_cursor": null,
+  "has_more": false
+}

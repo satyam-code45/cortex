@@ -1,0 +1,123 @@
+{
+  "note": "Gmail fixtures, inserted with internalDateSource=dateHeader so each message keeps its own date. The 2026-06-08 Nordwind delay notice is the root cause of the Atlas launch slip and exists in no other source: Jira says only 'blocked on the provider', and the Notion plan names Nordwind without saying what they told us. {{me}} is replaced at seed time with the authenticated mailbox address, so no personal address is committed here.",
+  "label": "Vantage Labs",
+  "messages": [
+    {
+      "from": "Ines Brandt <ines.brandt@nordwindpayments.example>",
+      "to": "{{me}}",
+      "subject": "Nordwind Payments v3 — integration kickoff and sandbox timeline",
+      "date": "2026-04-14T10:05:00+02:00",
+      "body": "Hello Priya,\n\nDelighted to be working with Vantage Labs on the Atlas billing platform. Confirming the timeline we agreed for your v3 integration:\n\n- v3 refunds sandbox, with settlement files: available to you 29 May 2026\n- v3 webhook delivery in sandbox: available at the same time\n- v3 webhook signature-verification specification: published ahead of the sandbox\n- Production credentials: on completion of your certification run\n\nThe sandbox is contractually at parity with production for every v3 endpoint in your integration scope, so anything you certify against it will behave the same way live.\n\nI am your escalation route for anything to do with delivery dates. I send delivery and delay notices by email — our partner portal only carries billing and invoices, so please do not wait on it for engineering news.\n\nBest regards,\nInes Brandt\nPartner Success Manager, Nordwind Payments"
+    },
+    {
+      "from": "Julian Vega <julian.vega@vantagelabs.example>",
+      "to": "{{me}}",
+      "subject": "Maintenance window: Postgres 16 upgrade, Saturday 9 May 02:00-04:00 UTC",
+      "date": "2026-05-06T16:40:00+02:00",
+      "body": "Platform team,\n\nWe are upgrading the primary Postgres cluster from 15 to 16 this Saturday, 9 May, between 02:00 and 04:00 UTC.\n\nExpected impact: two short failovers of under a minute each. Read replicas stay available throughout.\n\nNo action needed from product teams. I will confirm here when it is done.\n\nJulian"
+    },
+    {
+      "from": "Priya Raman <priya.raman@vantagelabs.example>",
+      "to": "{{me}}",
+      "cc": "Marcus Whitfield <marcus.whitfield@vantagelabs.example>",
+      "subject": "v3 refunds sandbox — credentials request ahead of 29 May",
+      "date": "2026-05-21T09:12:00+02:00",
+      "body": "Hi Ines,\n\nWe are ready on our side ahead of the 29 May sandbox date. Our contract tests for the refunds flow are written and passing against our own mock, so certification is the only outstanding item.\n\nCould you send sandbox credentials a few days early so we can wire up connectivity and not lose time on setup?\n\nOne more thing: Diego has been looking for the v3 webhook signature-verification specification and cannot find it on the developer site. Is it published yet?\n\nThanks,\nPriya"
+    },
+    {
+      "from": "People Operations <people@vantagelabs.example>",
+      "to": "{{me}}",
+      "subject": "Engineering offsite — 3 July, agenda and travel",
+      "date": "2026-06-02T11:00:00+02:00",
+      "body": "Everyone,\n\nThe engineering offsite is on Friday 3 July at the Hafenhalle.\n\n09:30 arrival and coffee\n10:00 platform roadmap\n11:30 team breakouts\n13:00 lunch\n14:30 lightning talks — sign up in the shared doc\n16:30 close\n\nTravel is reimbursable up to the standard cap. Let us know about dietary requirements by 24 June.\n\nPeople Ops"
+    },
+    {
+      "from": "Ines Brandt <ines.brandt@nordwindpayments.example>",
+      "to": "{{me}}",
+      "cc": "Marcus Whitfield <marcus.whitfield@vantagelabs.example>",
+      "subject": "Nordwind Payments: v3 refunds sandbox delayed",
+      "date": "2026-06-08T08:47:00+02:00",
+      "body": "Priya, Marcus,\n\nI am writing to let you know that the v3 refunds sandbox will not be available on 29 May as committed, and I am sorry to be sending this after the date rather than before it.\n\nThe cause is on our side and is not specific to Vantage Labs. Our settlement-ledger migration has overrun by several weeks. The refunds endpoints in v3 read from that ledger, so the sandbox cannot be made to behave like production until the migration completes. Standing up a partial sandbox without settlement data would give you something that certifies and then behaves differently live, which is worse than the delay.\n\nRevised expectation: late July. I am not able to give you a firm date today, and I would rather tell you that than give you one I cannot hold.\n\nSeparately, on Diego's question about the v3 webhook signature-verification specification: it is written but not yet published. I do not have a date for it either. Please do not build against the v2 signing document — the header name and the canonicalisation both changed in v3, so v2 will not verify a v3 signature.\n\nI am available for a call this week if it helps you replan.\n\nWith apologies,\nInes Brandt\nPartner Success Manager, Nordwind Payments"
+    },
+    {
+      "from": "Priya Raman <priya.raman@vantagelabs.example>",
+      "to": "{{me}}",
+      "subject": "Fwd: Nordwind Payments: v3 refunds sandbox delayed — impact on the refunds epic",
+      "date": "2026-06-09T09:30:00+02:00",
+      "body": "Marcus,\n\nForwarding Ines's note below. What it means for us:\n\n- Refunds API integration: blocked. Contract tests pass against our mock; we cannot certify without their sandbox. Nothing left for me to do here.\n- Refund reconciliation nightly job: blocked behind the above — Aisha needs a real settlement file to write the parser against.\n- Support-agent refund API: blocked behind the above; the call to the provider is stubbed.\n- Chargeback webhook receiver: separately blocked on the missing v3 signing spec. Diego cannot verify a signature he has no specification for.\n\nThat is four issues, and it is the whole refunds epic. This is not a capacity problem and there is no work I can pull forward to fill the gap.\n\nWe should assume 30 June is gone.\n\nPriya\n\n> The cause is on our side and is not specific to Vantage Labs. Our settlement-ledger\n> migration has overrun by several weeks. Revised expectation: late July."
+    },
+    {
+      "from": "Marcus Whitfield <marcus.whitfield@vantagelabs.example>",
+      "to": "{{me}}",
+      "cc": "Lena Fischer <lena.fischer@vantagelabs.example>",
+      "subject": "Atlas launch date — recommending we move to 14 August",
+      "date": "2026-06-11T17:20:00+02:00",
+      "body": "Fatima,\n\nI am recommending we move the Atlas billing launch from 30 June to 14 August.\n\nThe reason is Nordwind Payments. They told us on 8 June that the v3 refunds sandbox has slipped, with no firm date and a revised expectation of late July. Their settlement-ledger migration overran. Four Atlas issues are blocked behind it and the whole refunds epic is stopped.\n\nI want to be clear that this is not an engineering capacity problem. Priya's contract tests pass against our mock; there is nothing for the team to build faster. We are waiting on a vendor.\n\nWhy not launch without refunds: a biller that cannot process a refund is not something I am willing to put in front of customers. Every refund would become a manual finance ticket, and support would carry it. Chargebacks are blocked too, on a separate missing specification from the same vendor.\n\n14 August gives us two weeks after their late-July expectation to certify and run the readiness review again. If Nordwind slips a second time we will need to talk again.\n\nMarcus"
+    },
+    {
+      "from": "Fatima Al-Rashid <fatima.alrashid@vantagelabs.example>",
+      "to": "{{me}}",
+      "subject": "Re: Atlas launch date — recommending we move to 14 August",
+      "date": "2026-06-12T08:15:00+02:00",
+      "body": "Marcus,\n\nApproved. 14 August.\n\nI agree on not launching without refunds — that is the right call and I would have pushed back if you had proposed otherwise.\n\nTwo things I want from this:\n\n1. Put the vendor commitment and the slip in writing with Nordwind, so the next conversation about a notice period starts from a record rather than from memory.\n2. Make sure the tickets say what is actually happening. I looked at the refunds ticket before your mail and it says \"blocked on the provider\" with no vendor name and no date. Anyone outside the team reading that learns nothing.\n\nFatima"
+    },
+    {
+      "from": "Lena Fischer <lena.fischer@vantagelabs.example>",
+      "to": "{{me}}",
+      "subject": "Atlas billing launch is now 14 August",
+      "date": "2026-06-15T10:00:00+02:00",
+      "body": "Team,\n\nThe Atlas billing launch has moved from 30 June to 14 August. Fatima approved the change on Friday.\n\nWhy: our payments vendor has not delivered the v3 refunds sandbox we need in order to certify refunds. They notified us on 8 June and have not given a firm new date. We are not launching a billing platform that cannot process a refund.\n\nWhat this means:\n\n- Refunds, reconciliation, chargebacks: stay blocked. Please do not start speculative work against an unreleased sandbox.\n- Metered usage billing engine: due date moves to the revised launch date. It is not itself late.\n- Launch readiness review: rescheduled behind 14 August. The first one on 24 June was a no-go.\n- Comet: in-app plan management should plan for September.\n\nI will keep the Atlas Q2 plan page updated as we hear more.\n\nLena"
+    },
+    {
+      "from": "Diego Santos <diego.santos@vantagelabs.example>",
+      "to": "{{me}}",
+      "subject": "v3 webhook signature verification — still no specification",
+      "date": "2026-06-24T14:35:00+02:00",
+      "body": "Hello devrel,\n\nChasing the v3 webhook signature-verification specification again. This is my third request since 21 May.\n\nTo be specific about what I need: the header name carrying the signature, the exact canonicalisation of the payload before signing, the hash and the encoding, and the tolerance window for the timestamp.\n\nI have the v2 signing document. Ines has confirmed it does not apply — she says the header name and the canonicalisation both changed — so I am not able to work from it.\n\nOur chargeback webhook receiver cannot accept a single production webhook until this is published. I cannot verify a signature against a specification that does not exist, and accepting unverified webhooks on a payments endpoint is not something we will do.\n\nDiego Santos\nVantage Labs"
+    },
+    {
+      "from": "Ines Brandt <ines.brandt@nordwindpayments.example>",
+      "to": "{{me}}",
+      "cc": "Marcus Whitfield <marcus.whitfield@vantagelabs.example>",
+      "subject": "Nordwind Payments: refunds sandbox — second revision to the date",
+      "date": "2026-07-09T16:22:00+02:00",
+      "body": "Priya, Marcus,\n\nAn update I did not want to have to send. The late-July expectation for the v3 refunds sandbox will not hold either.\n\nThe settlement-ledger migration completed, but reconciling the migrated balances has turned up discrepancies that we have to resolve before we can generate credible settlement files in a sandbox. Giving you a sandbox with wrong settlement data would waste your certification run.\n\nNew expectation: first week of August. This time I have engineering sign-off on the date rather than a projection.\n\nThe v3 webhook signature-verification specification is now in final review and I expect it published within the next three weeks, ahead of the sandbox.\n\nI recognise this is the second slip and that you have already moved your launch once on account of the first.\n\nInes Brandt\nPartner Success Manager, Nordwind Payments"
+    },
+    {
+      "from": "Grace Lin <grace.lin@vantagelabs.example>",
+      "to": "{{me}}",
+      "subject": "Beacon: the v2 event envelope is frozen",
+      "date": "2026-07-15T09:45:00+02:00",
+      "body": "Everyone,\n\nThe v2 event envelope is frozen as of 3 July, following the identity resolution rewrite landing on 26 June.\n\nAtlas — this unblocks your usage event schema alignment. Tomas has the frozen schema and Nadia can walk you through what changed about canonical identifiers.\n\nGrace"
+    },
+    {
+      "from": "Yuki Tanaka <yuki.tanaka@vantagelabs.example>",
+      "to": "{{me}}",
+      "subject": "Comet TestFlight build 214 — release notes",
+      "date": "2026-07-28T18:10:00+02:00",
+      "body": "Build 214 is on TestFlight.\n\n- Fixed the crash on cold start when the auth token had expired overnight\n- Offline mode keeps the last synced dashboard instead of showing an empty state\n- Reduced app size by 4MB\n- In-app plan management remains behind a flag; it is still built against a mock\n\nSoak for 48 hours before we promote.\n\nYuki"
+    },
+    {
+      "from": "Nordwind Developer Relations <devrel@nordwindpayments.example>",
+      "to": "{{me}}",
+      "subject": "Published: Nordwind v3 webhook signature verification specification",
+      "date": "2026-08-03T11:30:00+02:00",
+      "body": "Partners,\n\nThe v3 webhook signature-verification specification is now published on the developer site.\n\nWhat changed from v2, in short:\n\n- The signature header is now Nordwind-Signature-V3, replacing X-NW-Signature\n- The canonicalisation is over the raw request body plus the timestamp, joined with a newline; v2 canonicalised parsed JSON with sorted keys\n- HMAC-SHA256, hex encoded, unchanged from v2\n- Timestamps outside a five-minute tolerance must be rejected\n\nThe v2 document does not apply to v3 endpoints. Verifying a v3 signature with the v2 procedure will fail on every request.\n\nNordwind Developer Relations"
+    },
+    {
+      "from": "Ines Brandt <ines.brandt@nordwindpayments.example>",
+      "to": "{{me}}",
+      "cc": "Marcus Whitfield <marcus.whitfield@vantagelabs.example>",
+      "subject": "Nordwind Payments: v3 refunds sandbox is live",
+      "date": "2026-08-05T09:05:00+02:00",
+      "body": "Priya,\n\nThe v3 refunds sandbox is available as of this morning, with settlement files generating nightly. Credentials are in the partner portal under your integration.\n\nThis is at full parity with production, including the settlement data that held it up. The webhook signing specification went out on Monday, so Diego has what he needs as well.\n\nAgain, my apologies for the two revisions. I would like to talk about a contractual notice period for sandbox delivery dates when your launch is behind you.\n\nInes"
+    },
+    {
+      "from": "Accounts Payable <ap@vantagelabs.example>",
+      "to": "{{me}}",
+      "subject": "Invoice NW-2026-0814 from Nordwind Payments — approval needed",
+      "date": "2026-08-10T13:15:00+02:00",
+      "body": "Invoice NW-2026-0814 from Nordwind Payments for Q3 platform fees is awaiting approval in the finance system.\n\nAmount and terms are unchanged from Q2. Please approve by 20 August so we do not incur a late fee.\n\nAccounts Payable"
+    }
+  ]
+}

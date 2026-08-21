@@ -1,0 +1,16 @@
+{
+  "object": "list",
+  "results": [
+    {
+      "object": "block",
+      "id": "1a2b3c4d-0000-0000-0000-00000000000a",
+      "type": "paragraph",
+      "has_children": false,
+      "paragraph": {
+        "rich_text": [{ "type": "text", "plain_text": "Vendor contact: ops@nordwind.example", "annotations": {} }]
+      }
+    }
+  ],
+  "next_cursor": null,
+  "has_more": false
+}

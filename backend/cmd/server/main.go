@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
+	"strings"
 	"syscall"
 	"time"
 
@@ -21,7 +23,9 @@ import (
 	"cortex/internal/jobs"
 	"cortex/internal/llm"
 	"cortex/internal/tools"
+	"cortex/internal/tools/gmail"
 	"cortex/internal/tools/jira"
+	"cortex/internal/tools/notion"
 )
 
 const (
@@ -103,10 +107,32 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	registry, err := tools.NewRegistry(jira.NewTools(jiraClient)...)
+	notionClient, err := notion.NewClient(notion.Config{
+		Token:  cfg.NotionToken,
+		Logger: logger,
+	})
 	if err != nil {
 		return err
 	}
+
+	gmailClient, err := buildGmailClient(cfg, logger)
+	if err != nil {
+		return err
+	}
+
+	// Eight tools, three sources. The registry is assembled in one place so a
+	// missing source is a startup failure rather than a silently smaller tool
+	// set: an agent that never learns email exists will still answer a question
+	// whose answer is only in email, and it will answer it wrongly.
+	registry, err := tools.NewRegistry(slices.Concat(
+		jira.NewTools(jiraClient),
+		notion.NewTools(notionClient),
+		gmail.NewTools(gmailClient),
+	)...)
+	if err != nil {
+		return err
+	}
+	logger.Info("tools registered", "count", registry.Len(), "names", strings.Join(registry.Names(), ", "))
 
 	orchestrator, err := agent.New(agent.Config{
 		DB:            pool,
@@ -205,4 +231,35 @@ func run(logger *slog.Logger) error {
 	}
 
 	return <-serveErr
+}
+
+// buildGmailClient wires the cached refresh token into a Gmail client.
+//
+// This is the one credential the server cannot obtain for itself: the OAuth
+// flow needs a human at a browser, so cmd/gmail-auth performs it once and
+// leaves a refresh token behind. Failing here — loudly, naming the command that
+// fixes it — is the whole point. The alternative, starting without Gmail, gives
+// an agent that cannot see a third of the evidence and has no way to know it.
+func buildGmailClient(cfg *config.Config, logger *slog.Logger) (*gmail.Client, error) {
+	creds, err := gmail.LoadCredentials(cfg.GmailCredentialsPath)
+	if err != nil {
+		return nil, err
+	}
+	token, err := gmail.LoadToken(cfg.GmailTokenPath)
+	if err != nil {
+		return nil, err
+	}
+	source, err := gmail.NewTokenSource(gmail.TokenSourceConfig{
+		Credentials: creds,
+		Token:       token,
+		TokenPath:   cfg.GmailTokenPath,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return gmail.NewClient(gmail.Config{
+		TokenSource: source,
+		QueryScope:  cfg.GmailQueryScope,
+		Logger:      logger,
+	})
 }

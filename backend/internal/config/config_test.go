@@ -23,6 +23,11 @@ var envKeys = []string{
 	"JIRA_BASE_URL",
 	"JIRA_EMAIL",
 	"JIRA_API_TOKEN",
+	"NOTION_TOKEN",
+	"NOTION_PARENT_PAGE_ID",
+	"GMAIL_CREDENTIALS_JSON",
+	"GMAIL_TOKEN_PATH",
+	"GMAIL_QUERY_SCOPE",
 }
 
 const (
@@ -31,6 +36,9 @@ const (
 	testJiraBaseURL  = "https://test.atlassian.net"
 	testJiraEmail    = "dev@example.com"
 	testJiraAPIToken = "jira-test-token"
+
+	testNotionToken    = "ntn-test-token"
+	testGmailCredsPath = "./testdata/gmail-credentials.json"
 )
 
 // requiredEnv is the minimum set that lets Load succeed, so a case can state
@@ -42,6 +50,12 @@ func requiredEnv() map[string]string {
 		"JIRA_BASE_URL":  testJiraBaseURL,
 		"JIRA_EMAIL":     testJiraEmail,
 		"JIRA_API_TOKEN": testJiraAPIToken,
+		// Required from Day 3 (REQ-3.4): the agent investigates across three
+		// sources, so a server that cannot reach one of them refuses to start
+		// rather than answering multi-hop questions with a third of the
+		// evidence missing.
+		"NOTION_TOKEN":           testNotionToken,
+		"GMAIL_CREDENTIALS_JSON": testGmailCredsPath,
 	}
 }
 
@@ -66,10 +80,14 @@ func TestLoad(t *testing.T) {
 		want            config.Config
 	}{
 		{
-			name:            "every missing required var is reported in one error",
-			env:             map[string]string{},
-			wantErr:         true,
-			wantErrContains: []string{"DATABASE_URL", "OPENAI_API_KEY", "JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"},
+			name:    "every missing required var is reported in one error",
+			env:     map[string]string{},
+			wantErr: true,
+			wantErrContains: []string{
+				"DATABASE_URL", "OPENAI_API_KEY",
+				"JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN",
+				"NOTION_TOKEN",
+			},
 		},
 		{
 			name:            "missing DATABASE_URL only",
@@ -111,6 +129,11 @@ func TestLoad(t *testing.T) {
 				JiraBaseURL:     testJiraBaseURL,
 				JiraEmail:       testJiraEmail,
 				JiraAPIToken:    testJiraAPIToken,
+				NotionToken:     testNotionToken,
+				// Relative credential paths resolve against the repository root,
+				// not the working directory — every make target runs from backend/.
+				GmailCredentialsPath: config.RepoPath(testGmailCredsPath),
+				GmailTokenPath:       config.RepoPath(config.DefaultGmailTokenPath),
 			},
 		},
 		{
@@ -139,6 +162,11 @@ func TestLoad(t *testing.T) {
 				JiraBaseURL:     testJiraBaseURL,
 				JiraEmail:       testJiraEmail,
 				JiraAPIToken:    testJiraAPIToken,
+				NotionToken:     testNotionToken,
+				// Relative credential paths resolve against the repository root,
+				// not the working directory — every make target runs from backend/.
+				GmailCredentialsPath: config.RepoPath(testGmailCredsPath),
+				GmailTokenPath:       config.RepoPath(config.DefaultGmailTokenPath),
 			},
 		},
 		{
@@ -164,6 +192,11 @@ func TestLoad(t *testing.T) {
 				JiraBaseURL:     testJiraBaseURL,
 				JiraEmail:       testJiraEmail,
 				JiraAPIToken:    testJiraAPIToken,
+				NotionToken:     testNotionToken,
+				// Relative credential paths resolve against the repository root,
+				// not the working directory — every make target runs from backend/.
+				GmailCredentialsPath: config.RepoPath(testGmailCredsPath),
+				GmailTokenPath:       config.RepoPath(config.DefaultGmailTokenPath),
 			},
 		},
 		{
@@ -187,6 +220,11 @@ func TestLoad(t *testing.T) {
 				JiraBaseURL:     testJiraBaseURL,
 				JiraEmail:       testJiraEmail,
 				JiraAPIToken:    testJiraAPIToken,
+				NotionToken:     testNotionToken,
+				// Relative credential paths resolve against the repository root,
+				// not the working directory — every make target runs from backend/.
+				GmailCredentialsPath: config.RepoPath(testGmailCredsPath),
+				GmailTokenPath:       config.RepoPath(config.DefaultGmailTokenPath),
 			},
 		},
 		{
@@ -207,6 +245,11 @@ func TestLoad(t *testing.T) {
 				JiraBaseURL:     testJiraBaseURL,
 				JiraEmail:       testJiraEmail,
 				JiraAPIToken:    testJiraAPIToken,
+				NotionToken:     testNotionToken,
+				// Relative credential paths resolve against the repository root,
+				// not the working directory — every make target runs from backend/.
+				GmailCredentialsPath: config.RepoPath(testGmailCredsPath),
+				GmailTokenPath:       config.RepoPath(config.DefaultGmailTokenPath),
 			},
 		},
 		{
@@ -225,6 +268,11 @@ func TestLoad(t *testing.T) {
 				JiraBaseURL:     testJiraBaseURL,
 				JiraEmail:       testJiraEmail,
 				JiraAPIToken:    testJiraAPIToken,
+				NotionToken:     testNotionToken,
+				// Relative credential paths resolve against the repository root,
+				// not the working directory — every make target runs from backend/.
+				GmailCredentialsPath: config.RepoPath(testGmailCredsPath),
+				GmailTokenPath:       config.RepoPath(config.DefaultGmailTokenPath),
 			},
 		},
 	}

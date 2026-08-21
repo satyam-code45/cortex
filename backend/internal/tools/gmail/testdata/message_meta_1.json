@@ -1,0 +1,33 @@
+{
+  "id": "18f2a3b4c5d6e7f8",
+  "threadId": "18f2a3b4c5d6e7f8",
+  "labelIds": [
+    "INBOX",
+    "Label_7"
+  ],
+  "snippet": "Nordwind Payments: the v3 refunds sandbox will not be available until 2026-07-15.",
+  "internalDate": "1781255640000",
+  "payload": {
+    "partId": "",
+    "mimeType": "multipart/alternative",
+    "filename": "",
+    "headers": [
+      {
+        "name": "From",
+        "value": "Ana Vogt <ana.vogt@nordwind.example>"
+      },
+      {
+        "name": "To",
+        "value": "priya.raman@vantagelabs.test"
+      },
+      {
+        "name": "Subject",
+        "value": "Nordwind v3 refunds sandbox: revised availability"
+      },
+      {
+        "name": "Date",
+        "value": "Fri, 12 Jun 2026 09:14:00 +0000"
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "object": "page",
+  "id": "3c34fab1-2b9b-80d6-8cfb-c64d5b8cebe0",
+  "created_time": "2026-04-02T09:15:00.000Z",
+  "last_edited_time": "2026-06-18T14:22:31.000Z",
+  "url": "https://www.notion.so/Atlas-Q2-Plan-3c34fab12b9b80d68cfbc64d5b8cebe0",
+  "in_trash": false,
+  "parent": { "type": "page_id", "page_id": "11112222-3333-4444-5555-666677778888" },
+  "properties": {
+    "title": {
+      "id": "title",
+      "type": "title",
+      "title": [
+        { "type": "text", "plain_text": "Atlas Q2 Plan", "href": null, "annotations": {} }
+      ]
+    }
+  }
+}

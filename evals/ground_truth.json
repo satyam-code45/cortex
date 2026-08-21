@@ -1,7 +1,7 @@
 {
   "company": "Vantage Labs",
   "as_of": "2026-08-21",
-  "note": "Derived from seeder/fixtures/. Issues are identified by summary because Jira assigns keys at seed time.",
+  "note": "Derived from seeder/fixtures/. Issues are identified by summary because Jira assigns keys at seed time. From Day 3 the corpus spans three sources: Jira (issues.json), Notion (notion.json) and Gmail (gmail.json).",
   "projects": {
     "ATLAS": {
       "name": "Atlas",
@@ -22,7 +22,7 @@
       "revised_date": "2026-08-14",
       "reason": "The payment provider did not deliver the v3 refunds sandbox, which blocked the refunds epic. A biller that cannot process a refund was judged not launchable.",
       "decided_by": "Marcus Whitfield, confirmed by Fatima Al-Rashid",
-      "note_for_multi_hop": "Jira never names the provider. Day 3 adds a Notion plan that names Nordwind Payments and a Nordwind email carrying the delay announcement."
+      "note_for_multi_hop": "Jira never names the provider. The Notion page 'Atlas Q2 Plan' names Nordwind Payments and gives the partner contact; the Gmail message 'Nordwind Payments: v3 refunds sandbox delayed' (2026-06-08) carries the delay announcement and its reason. No single source holds the chain."
     },
     "atlas_blocked_issues": [
       {
@@ -177,6 +177,33 @@
       "beacon_envelope": "Tomas Ferreira",
       "identity_resolution": "Nadia Haddad",
       "comet_plan_management": "Oskar Nowak"
+    },
+    "vendor": {
+      "name": "Nordwind Payments",
+      "contact": "Ines Brandt, Partner Success Manager, ines.brandt@nordwindpayments.example",
+      "named_in": "notion:Atlas Q2 Plan",
+      "never_named_in": "jira",
+      "root_cause": "Nordwind's settlement-ledger migration overran, so the v3 refunds sandbox could not reach parity with production.",
+      "delay_notices": [
+        {
+          "date": "2026-06-08",
+          "source": "gmail",
+          "subject": "Nordwind Payments: v3 refunds sandbox delayed",
+          "says": "29 May commitment missed; revised expectation 'late July', no firm date; v3 webhook signing spec written but unpublished; do not build against the v2 signing document."
+        },
+        {
+          "date": "2026-07-09",
+          "source": "gmail",
+          "subject": "Nordwind Payments: refunds sandbox — second revision to the date",
+          "says": "Late July will not hold either; new expectation first week of August, with engineering sign-off."
+        },
+        {
+          "date": "2026-08-05",
+          "source": "gmail",
+          "subject": "Nordwind Payments: v3 refunds sandbox is live",
+          "says": "Sandbox available with settlement files, at parity with production."
+        }
+      ]
     }
   },
   "questions": [
@@ -242,6 +269,107 @@
         "jira_search_issues",
         "jira_get_comments"
       ]
+    }
+  ],
+  "multi_hop_questions": [
+    {
+      "question": "Why was the payment integration delayed and how did it affect the launch date?",
+      "expected_answer": "The Atlas billing launch moved from 2026-06-30 to 2026-08-14 because Nordwind Payments, the payments vendor, failed to deliver the v3 refunds sandbox it had committed to for 29 May. Nordwind's own settlement-ledger migration overran, and the v3 refunds endpoints read from that ledger, so the sandbox could not be brought to parity with production. Ines Brandt of Nordwind gave notice by email on 2026-06-08 with no firm new date. Without the sandbox the refunds integration could not be certified, which blocked reconciliation and the support-agent refund API behind it; the chargeback receiver was separately blocked on the unpublished v3 webhook signing specification. Marcus Whitfield recommended the new date on 2026-06-11 on the grounds that a biller which cannot process a refund is not launchable, and Fatima Al-Rashid approved it on 2026-06-12.",
+      "hops": [
+        {
+          "source": "jira",
+          "fact": "The refunds integration is blocked 'on the provider'; the due date moved twice; a comment points at an emailed delay notice and at the Atlas launch plan. The vendor is never named."
+        },
+        {
+          "source": "notion",
+          "fact": "'Atlas Q2 Plan' names the vendor as Nordwind Payments, gives the original 2026-06-30 launch date and the 29 May sandbox commitment, and records that Nordwind sends delivery news by email rather than through the partner portal."
+        },
+        {
+          "source": "gmail",
+          "fact": "Nordwind's 2026-06-08 notice states the reason (settlement-ledger migration overrun) and the absence of a firm date; the 2026-06-11 and 2026-06-12 thread carries the recommendation and approval of the 14 August launch."
+        }
+      ],
+      "requires": [
+        "jira_search_issues",
+        "jira_get_comments",
+        "notion_search",
+        "notion_get_page",
+        "gmail_search",
+        "gmail_get_message"
+      ],
+      "unanswerable_from_single_source": true,
+      "note": "The Day 3 acceptance question. Jira alone yields 'blocked on the provider' with no cause; Notion alone names a vendor but not what they said; Gmail alone has the notice but not which issues it blocked."
+    },
+    {
+      "question": "Who at the payment vendor told us about the delay, and when?",
+      "expected_answer": "Ines Brandt, Partner Success Manager at Nordwind Payments, on 2026-06-08. She sent a second revision on 2026-07-09 and confirmed the sandbox was live on 2026-08-05. Jira records none of this: the Atlas Q2 Plan in Notion names Nordwind and identifies Ines Brandt as the escalation contact, and the messages themselves are in email.",
+      "hops": [
+        {
+          "source": "notion",
+          "fact": "'Atlas Q2 Plan' names Nordwind Payments and Ines Brandt as the named escalation contact who sends delay notices by email."
+        },
+        {
+          "source": "gmail",
+          "fact": "The 2026-06-08 message from ines.brandt@nordwindpayments.example is the delay notice itself, with two follow-ups on 2026-07-09 and 2026-08-05."
+        }
+      ],
+      "requires": [
+        "notion_search",
+        "notion_get_page",
+        "gmail_search",
+        "gmail_get_message"
+      ],
+      "unanswerable_from_single_source": true,
+      "note": "Jira contributes nothing here, which is the point: a question about who said what to whom cannot be answered from a tracker."
+    },
+    {
+      "question": "Which blocked Atlas issues rest on a dependency the Q2 plan never anticipated?",
+      "expected_answer": "The chargeback webhook receiver, owned by Diego Santos. The Q2 plan assumed the v2 webhook signing document would carry over to v3 and recorded that assumption as a risk; it did not. Nordwind confirmed on 2026-06-08 that the header name and the canonicalisation both changed in v3 and that the v3 specification was unpublished, so Diego could not verify a signature at all. The specification was finally published on 2026-08-03. The other blocked issues — the refunds integration, the reconciliation job and the support-agent refund API — all rest on the sandbox dependency the plan did anticipate.",
+      "hops": [
+        {
+          "source": "notion",
+          "fact": "'Atlas Q2 Plan' lists the planned Nordwind dependencies and records, under risks, the assumption that the v2 webhook signing document would carry over."
+        },
+        {
+          "source": "jira",
+          "fact": "The chargeback webhook receiver is blocked, and Diego's comment says the v2 signing doc does not apply to v3 because the header name and canonicalisation changed."
+        },
+        {
+          "source": "gmail",
+          "fact": "Nordwind's 2026-06-08 notice confirms the v3 spec is unpublished and warns against building on v2; the 2026-08-03 devrel message publishes it and lists what changed."
+        }
+      ],
+      "requires": [
+        "notion_search",
+        "notion_get_page",
+        "jira_search_issues",
+        "jira_get_comments",
+        "gmail_search"
+      ],
+      "unanswerable_from_single_source": true,
+      "note": "Requires distinguishing a planned dependency from an unplanned one, which only the plan document establishes."
+    },
+    {
+      "question": "When did the v3 webhook signing specification finally arrive, and which ticket was waiting on it?",
+      "expected_answer": "Nordwind published the v3 webhook signature-verification specification on 2026-08-03. The Atlas chargeback webhook receiver, owned by Diego Santos, was the ticket waiting on it — it could not accept a production webhook without a specification to verify signatures against. The published spec changed the signature header to Nordwind-Signature-V3 and canonicalises the raw body plus timestamp rather than parsed JSON with sorted keys.",
+      "hops": [
+        {
+          "source": "gmail",
+          "fact": "The 2026-08-03 message from Nordwind developer relations publishes the specification and details what changed from v2."
+        },
+        {
+          "source": "jira",
+          "fact": "The chargeback webhook receiver is the issue blocked on that specification, per Diego Santos's comments."
+        }
+      ],
+      "requires": [
+        "gmail_search",
+        "gmail_get_message",
+        "jira_search_issues",
+        "jira_get_comments"
+      ],
+      "unanswerable_from_single_source": true,
+      "note": "Runs the chain backwards — email first, then the ticket — so a run that only ever starts in Jira will miss the date."
     }
   ]
 }

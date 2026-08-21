@@ -204,17 +204,6 @@ func formatDate(value string) string {
 	return value
 }
 
-// maxSnippetRunes caps the text stored on an EvidenceItem. Evidence rows are
-// persisted per run and rendered in the trace panel, so a whole 4KB description
-// in every snippet would bloat both.
-const maxSnippetRunes = 300
-
-// snippet shortens text for an EvidenceItem.
-func snippet(text string) string {
-	collapsed := strings.Join(strings.Fields(text), " ")
-	runes := []rune(collapsed)
-	if len(runes) <= maxSnippetRunes {
-		return collapsed
-	}
-	return strings.TrimSpace(string(runes[:maxSnippetRunes])) + "…"
-}
+// snippet shortens text for an EvidenceItem. The cap lives with the evidence
+// schema it serves, in package tools.
+func snippet(text string) string { return tools.Snippet(text) }

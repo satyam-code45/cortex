@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"cortex/internal/llm"
@@ -75,6 +76,24 @@ type EvidenceItem struct {
 	// Timestamp is when the source was last changed, where the source reports
 	// it. Nil when unknown — an absent timestamp is honest, a zero one is not.
 	Timestamp *time.Time
+}
+
+// MaxSnippetRunes caps the text stored on an EvidenceItem.
+//
+// Evidence rows are persisted per run and rendered in the trace panel, so a
+// whole 4KB description in every snippet would bloat both. It lives here rather
+// than in each integration because it is a property of the evidence schema that
+// Day 4 citations render, not of any one source.
+const MaxSnippetRunes = 300
+
+// Snippet shortens text for an EvidenceItem, collapsing whitespace.
+func Snippet(text string) string {
+	collapsed := strings.Join(strings.Fields(text), " ")
+	runes := []rune(collapsed)
+	if len(runes) <= MaxSnippetRunes {
+		return collapsed
+	}
+	return strings.TrimSpace(string(runes[:MaxSnippetRunes])) + "…"
 }
 
 // Registry resolves tool names to tools and renders the definitions sent to the
