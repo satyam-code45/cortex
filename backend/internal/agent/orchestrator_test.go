@@ -159,8 +159,9 @@ func TestRunHappyPath(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if provider.callCount() != 2 {
-		t.Errorf("provider calls = %d, want 2", provider.callCount())
+	// One reasoning turn, one answer, one completeness check on that answer.
+	if provider.callCount() != 3 {
+		t.Errorf("provider calls = %d, want 3", provider.callCount())
 	}
 	if tool.executions() != 1 {
 		t.Errorf("tool executions = %d, want 1", tool.executions())
@@ -206,6 +207,8 @@ func TestRunHappyPath(t *testing.T) {
 		agent.EventLLMCall,
 		agent.EventToolCallStarted,
 		agent.EventToolCallFinished,
+		agent.EventLLMCall,
+		// The completeness check: a generation that reviews the draft answer.
 		agent.EventLLMCall,
 		agent.EventAnswer,
 		agent.EventRunFinished,
@@ -265,10 +268,13 @@ func TestRunHappyPath(t *testing.T) {
 
 	// Every generation is accounted for on llm_calls with its purpose.
 	calls := loadLLMCalls(t, pool, seeded.runID)
-	if len(calls) != 2 {
-		t.Fatalf("llm_calls = %d, want 2", len(calls))
+	if len(calls) != 3 {
+		t.Fatalf("llm_calls = %d, want 3", len(calls))
 	}
-	for i, c := range calls {
+	if last := calls[len(calls)-1]; last.purpose != agent.PurposeCompletenessCheck {
+		t.Errorf("final llm_call purpose = %q, want %q", last.purpose, agent.PurposeCompletenessCheck)
+	}
+	for i, c := range calls[:len(calls)-1] {
 		if c.purpose != agent.PurposeAgentLoop {
 			t.Errorf("llm_calls[%d].purpose = %q, want %q", i, c.purpose, agent.PurposeAgentLoop)
 		}
@@ -586,8 +592,8 @@ func TestRunInvalidArgumentsBecomeObservations(t *testing.T) {
 			if tool.executions() != 0 {
 				t.Errorf("tool executions = %d, want 0 (invalid arguments never reach the tool)", tool.executions())
 			}
-			if provider.callCount() != 2 {
-				t.Errorf("provider calls = %d, want 2 (the loop continues past a bad call)", provider.callCount())
+			if provider.callCount() != 3 {
+				t.Errorf("provider calls = %d, want 3 (the loop continues past a bad call, then the answer is checked)", provider.callCount())
 			}
 
 			run := loadRun(t, pool, seeded.runID)
@@ -873,14 +879,15 @@ func TestRunSummarizesOversizedToolResult(t *testing.T) {
 	if err := o.Run(context.Background(), seeded.runID); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if provider.callCount() != 3 {
-		t.Fatalf("provider calls = %d, want 3 (loop, summarize, loop)", provider.callCount())
+	if provider.callCount() != 4 {
+		t.Fatalf("provider calls = %d, want 4 (loop, summarize, loop, completeness check)", provider.callCount())
 	}
 
 	// TEST-2.2's purpose assertion, as persisted: llm_calls carries the
 	// summarization under its own purpose and on the utility model.
 	calls := loadLLMCalls(t, pool, seeded.runID)
-	want := []string{agent.PurposeAgentLoop, agent.PurposeToolOutputSummary, agent.PurposeAgentLoop}
+	want := []string{agent.PurposeAgentLoop, agent.PurposeToolOutputSummary,
+		agent.PurposeAgentLoop, agent.PurposeCompletenessCheck}
 	if got := purposesOf(calls); !equalStrings(got, want) {
 		t.Fatalf("llm_calls purposes = %v, want %v", got, want)
 	}
@@ -964,8 +971,9 @@ func TestRunDoesNotSummarizeResultWithinBudget(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if got := purposesOf(loadLLMCalls(t, pool, seeded.runID)); !equalStrings(got, []string{agent.PurposeAgentLoop, agent.PurposeAgentLoop}) {
-		t.Errorf("llm_calls purposes = %v, want two agent_loop calls and no summarization", got)
+	if got := purposesOf(loadLLMCalls(t, pool, seeded.runID)); !equalStrings(got,
+		[]string{agent.PurposeAgentLoop, agent.PurposeAgentLoop, agent.PurposeCompletenessCheck}) {
+		t.Errorf("llm_calls purposes = %v, want two agent_loop calls, the completeness check, and no summarization", got)
 	}
 	finished := decodePayload(t, eventsOfType(loadEvents(t, pool, seeded.runID), agent.EventToolCallFinished)[0])
 	if truncated, _ := finished["truncated"].(bool); truncated {

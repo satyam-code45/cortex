@@ -179,8 +179,10 @@ func TestRunMultiHopAcrossThreeSources(t *testing.T) {
 			t.Errorf("%s executions = %d, want 1", tool.name, n)
 		}
 	}
-	if provider.callCount() != 4 {
-		t.Errorf("provider calls = %d, want 4 (three hops plus the synthesis)", provider.callCount())
+	// Three hops, the synthesis, and the completeness check that re-reads the
+	// synthesis before it is accepted.
+	if provider.callCount() != 5 {
+		t.Errorf("provider calls = %d, want 5 (three hops, the synthesis, the completeness check)", provider.callCount())
 	}
 
 	// The answer synthesizes all three observations: the ticket, the vendor
@@ -220,6 +222,9 @@ func TestRunMultiHopAcrossThreeSources(t *testing.T) {
 		agent.EventLLMCall,
 		agent.EventToolCallStarted,
 		agent.EventToolCallFinished,
+		agent.EventLLMCall,
+		// The completeness check is a second generation with no tool calls,
+		// between the draft answer and the accepted one.
 		agent.EventLLMCall,
 		agent.EventAnswer,
 		agent.EventRunFinished,

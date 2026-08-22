@@ -57,6 +57,10 @@ const (
 	PurposeToolOutputSummary = "tool_output_summary"
 	// PurposeFinalAnswer is the forced answer after the iteration cap is hit.
 	PurposeFinalAnswer = "final_answer"
+
+	// PurposeCompletenessCheck is the one call per run that re-reads the model's
+	// own draft answer against the question before it is accepted.
+	PurposeCompletenessCheck = "completeness_check"
 )
 
 // runStartedPayload is the payload of EventRunStarted.

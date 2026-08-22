@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -28,6 +29,22 @@ type Queue struct {
 	// depend on how River happens to represent an insert-only client.
 	processing bool
 }
+
+// jobTimeout bounds one agent run.
+//
+// River's own default is one minute, and it cancels the job's context when it
+// elapses — which killed exactly the runs worth having. A multi-hop
+// investigation makes a dozen LLM calls (90s allowed each) plus Jira, Notion and
+// Gmail round trips, so the deeper the investigation, the more certainly it died
+// at 60s with "llm request timed out". Shallow runs finished and looked fine,
+// which is what made it easy to miss.
+//
+// The ceiling that actually bounds a run is MAX_ITERATIONS, not the clock, so
+// this is set well above any legitimate run and exists only to stop a wedged job
+// from occupying a worker forever. It must stay below River's
+// RescueStuckJobsAfter (1h by default), or a slow run would be rescued and
+// retried while it is still working.
+const jobTimeout = 15 * time.Minute
 
 // Config configures the job queue.
 type Config struct {
@@ -57,7 +74,7 @@ func New(cfg Config) (*Queue, error) {
 		logger = slog.Default()
 	}
 
-	riverConfig := &river.Config{Logger: logger}
+	riverConfig := &river.Config{Logger: logger, JobTimeout: jobTimeout}
 
 	processing := cfg.Worker != nil
 	if cfg.Worker != nil {

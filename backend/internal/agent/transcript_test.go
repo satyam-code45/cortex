@@ -69,8 +69,8 @@ func TestReconstructTranscriptMatchesTheLoop(t *testing.T) {
 	if err := o.Run(context.Background(), seeded.runID); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if provider.callCount() != 3 {
-		t.Fatalf("provider calls = %d, want 3", provider.callCount())
+	if provider.callCount() != 4 {
+		t.Fatalf("provider calls = %d, want 4", provider.callCount())
 	}
 
 	// The transcript the loop actually used is the request behind its last
@@ -91,9 +91,12 @@ func TestReconstructTranscriptMatchesTheLoop(t *testing.T) {
 
 	// Sanity: the transcript is the real thing, not two empty slices matching.
 	// 2 history turns + the question + (assistant, observation) + (assistant,
-	// observation, observation) = 8.
-	if len(messages) != 8 {
-		t.Errorf("reconstructed %d messages, want 8: %s", len(messages), describeTranscript(messages))
+	// observation, observation) = 8, plus the draft answer and the completeness
+	// check injected before that answer is accepted = 10. Both of those last two
+	// are turns the model saw, so a replay that omits them resumes from a
+	// conversation that never happened.
+	if len(messages) != 10 {
+		t.Errorf("reconstructed %d messages, want 10: %s", len(messages), describeTranscript(messages))
 	}
 }
 

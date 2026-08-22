@@ -133,25 +133,34 @@ func resolveParentPage(ctx context.Context, client *notion.Client, configured st
 		return configured, nil
 	}
 
-	ids, titles, err := client.SharedPageIDs(ctx, 10)
+	shared, err := client.SharedPages(ctx, 25)
 	if err != nil {
 		return "", err
 	}
-	switch len(ids) {
-	case 0:
+	if len(shared) == 0 {
 		return "", fmt.Errorf("no Notion pages are shared with this integration; " +
 			"open the page you want the fixtures under, use Share to add the integration, then re-run")
-	case 1:
-		return ids[0], nil
-	default:
-		var b strings.Builder
-		b.WriteString("several Notion pages are shared with this integration, so the parent is ambiguous; " +
-			"set NOTION_PARENT_PAGE_ID to one of:\n")
-		for i, id := range ids {
-			fmt.Fprintf(&b, "  %s  %s\n", id, titles[i])
-		}
-		return "", fmt.Errorf("%s", b.String())
 	}
+
+	// Children of an already-shared page are not candidates: after the first
+	// seed the integration can see the fixtures it created, and those must not
+	// become parents for the next run.
+	roots := notion.RootSharedPages(shared)
+	if len(roots) == 1 {
+		return roots[0].ID, nil
+	}
+
+	candidates := roots
+	if len(candidates) == 0 {
+		candidates = shared
+	}
+	var b strings.Builder
+	b.WriteString("several top-level Notion pages are shared with this integration, so the parent is " +
+		"ambiguous; set NOTION_PARENT_PAGE_ID to one of:\n")
+	for _, p := range candidates {
+		fmt.Fprintf(&b, "  %s  %s\n", p.ID, p.Title)
+	}
+	return "", fmt.Errorf("%s", b.String())
 }
 
 // reportNotionPlan prints what a real run would do, without writing anything.

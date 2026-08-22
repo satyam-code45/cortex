@@ -45,16 +45,87 @@ const (
 	maxCommentsFetched = 50
 	// maxChangelogFetched caps changelog entries per issue.
 	maxChangelogFetched = 100
+
+	// maxProjectsListed caps jira_list_projects. The seeded site has three; the
+	// cap is there so an unfamiliar site cannot spend the prompt budget on a
+	// project directory.
+	maxProjectsListed = 50
 )
 
 // NewTools builds the Jira tool set backed by c.
 func NewTools(c *Client) []tools.Tool {
 	return []tools.Tool{
+		&listProjectsTool{client: c},
 		&searchIssuesTool{client: c},
 		&getIssueTool{client: c},
 		&getIssueHistoryTool{client: c},
 		&getCommentsTool{client: c},
 	}
+}
+
+// ---------------------------------------------------------------------------
+// jira_list_projects
+// ---------------------------------------------------------------------------
+
+// listProjectsTool exists because a guessed project key is unrecoverable.
+//
+// Observed in run a3b7a833: asked about "the payment integration", the model
+// opened with `project = PAYMENT AND text ~ "integration"` — a key invented from
+// the wording of the question. Jira answers an unknown key with zero results,
+// which is indistinguishable from "no such issues", so the investigation
+// collapsed to an empty answer after four calls without ever touching a real
+// project. Listing costs one cheap call and removes the whole failure class.
+type listProjectsTool struct{ client *Client }
+
+func (t *listProjectsTool) Name() string { return "jira_list_projects" }
+
+func (t *listProjectsTool) Description() string {
+	return "List the Jira projects that exist, with their keys and names. Call this FIRST when a " +
+		"question names a system, product, or area of work rather than a project key — a key " +
+		"guessed from the wording of a question almost never exists, and JQL answers an unknown " +
+		"key with zero results rather than an error, which is indistinguishable from there being " +
+		"no such issues. One cheap call establishes what you are actually searching."
+}
+
+func (t *listProjectsTool) Schema() json.RawMessage {
+	return json.RawMessage(`{
+  "type": "object",
+  "properties": {},
+  "required": []
+}`)
+}
+
+func (t *listProjectsTool) Execute(ctx context.Context, _ json.RawMessage) (tools.Result, error) {
+	projects, err := t.client.listProjects(ctx)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	if len(projects) == 0 {
+		return tools.Result{
+			Content: "This Jira site has no projects visible to Cortex. Any issue search will " +
+				"return nothing, and that says nothing about whether the work exists.",
+			Evidence: []tools.EvidenceItem{},
+		}, nil
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d Jira project(s):\n", len(projects))
+	evidence := make([]tools.EvidenceItem, 0, len(projects))
+	for _, p := range projects {
+		line := fmt.Sprintf("%s — %s", p.Key, p.Name)
+		b.WriteString(line)
+		b.WriteString("\n")
+		evidence = append(evidence, tools.EvidenceItem{
+			Source:     sourceJira,
+			ExternalID: p.Key,
+			Title:      p.Name,
+			URL:        t.client.baseURL + "/browse/" + url.PathEscape(p.Key),
+			Snippet:    snippet(line),
+		})
+	}
+	b.WriteString("Use one of these keys in JQL, e.g. `project = " + projects[0].Key + "`.")
+
+	return tools.Result{Content: b.String(), Evidence: evidence}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -129,11 +200,15 @@ func (t *searchIssuesTool) Execute(ctx context.Context, args json.RawMessage) (t
 		// does not prove, and names the ways out.
 		return tools.Result{
 			Content: fmt.Sprintf("No issues matched the JQL query: %s\n\n"+
-				"Note: this does not establish that no such issues exist. It usually means the "+
-				"query filtered on a value this project does not use — for example a status that "+
-				"is not in its workflow, or a differently-spelled label. Before concluding that "+
-				"nothing matches, try a broader query: drop the most specific clause, list the "+
-				"project's issues to see the statuses and summaries actually in use, or search "+
+				"Note: this does not establish that no such issues exist. Two causes are far more "+
+				"likely than absence.\n"+
+				"1. The project key does not exist. Jira answers an unknown key with zero results "+
+				"rather than an error, so a key guessed from the wording of a question looks "+
+				"exactly like an empty project. If this query named a project, call "+
+				"jira_list_projects and check the key is real before drawing any conclusion.\n"+
+				"2. The query filtered on a value this project does not use — a status that is not "+
+				"in its workflow, or a differently-spelled label.\n"+
+				"Either way, broaden before concluding: drop the most specific clause, or search "+
 				"text with the ~ operator (e.g. summary ~ \"blocked\" OR description ~ \"blocked\").",
 				jql),
 			Evidence: []tools.EvidenceItem{},

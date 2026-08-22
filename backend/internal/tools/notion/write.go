@@ -174,20 +174,66 @@ func (c *Client) PageTitle(ctx context.Context, pageID string) (string, error) {
 	return p.title(), nil
 }
 
-// SharedPageIDs returns the ids of every page the integration can see, newest
-// first. The seeder uses it to default the parent page when none is configured.
-func (c *Client) SharedPageIDs(ctx context.Context, limit int) ([]string, []string, error) {
+// SharedPage is one page the integration can see.
+type SharedPage struct {
+	ID    string
+	Title string
+	// ParentPageID is the page this one sits under, empty when it is not
+	// parented by another page.
+	ParentPageID string
+}
+
+// SharedPages returns every page the integration can see, newest first. The
+// seeder uses it to default the parent page when none is configured.
+func (c *Client) SharedPages(ctx context.Context, limit int) ([]SharedPage, error) {
 	pages, err := c.searchPages(ctx, "", limit)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	ids := make([]string, 0, len(pages))
-	titles := make([]string, 0, len(pages))
+	out := make([]SharedPage, 0, len(pages))
 	for _, p := range pages {
-		ids = append(ids, p.ID)
-		titles = append(titles, p.title())
+		out = append(out, SharedPage{
+			ID:           p.ID,
+			Title:        p.title(),
+			ParentPageID: normalizedParentID(p),
+		})
 	}
-	return ids, titles, nil
+	return out, nil
+}
+
+// RootSharedPages returns the shared pages that are not themselves children of
+// another shared page.
+//
+// This is what keeps auto-discovery working after the first seed. Sharing a
+// page with an integration also exposes everything under it, so once the
+// fixtures exist, "the pages this integration can see" is the parent plus five
+// children — and picking between them by hand every time would be a poor trade
+// for a command whose whole point is being re-runnable.
+func RootSharedPages(pages []SharedPage) []SharedPage {
+	shared := make(map[string]bool, len(pages))
+	for _, p := range pages {
+		shared[p.ID] = true
+	}
+	var roots []SharedPage
+	for _, p := range pages {
+		if p.ParentPageID == "" || !shared[p.ParentPageID] {
+			roots = append(roots, p)
+		}
+	}
+	return roots
+}
+
+// normalizedParentID returns a page's parent page id in the dashed form the API
+// reports elsewhere, so the two can be compared.
+func normalizedParentID(p page) string {
+	if p.Parent.Type != "page_id" || p.Parent.PageID == "" {
+		return ""
+	}
+	normalized, err := normalizeID(p.Parent.PageID)
+	if err != nil {
+		return p.Parent.PageID
+	}
+	return normalized
 }
 
 // deleteBlock moves a block to the workspace trash.

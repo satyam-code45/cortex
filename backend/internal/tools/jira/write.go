@@ -84,6 +84,29 @@ func (c *Client) GetProject(ctx context.Context, key string) (*Project, error) {
 	return &project, nil
 }
 
+// projectSearchResponse is the body of GET /rest/api/3/project/search.
+type projectSearchResponse struct {
+	Values []Project `json:"values"`
+	IsLast bool      `json:"isLast"`
+}
+
+// listProjects returns every project visible to the authenticated account.
+//
+// /project/search rather than the deprecated /project: the latter returns an
+// unbounded array, and a site with hundreds of projects would put all of them
+// into the prompt.
+func (c *Client) listProjects(ctx context.Context) ([]Project, error) {
+	query := url.Values{}
+	query.Set("maxResults", strconv.Itoa(maxProjectsListed))
+	query.Set("orderBy", "key")
+
+	var resp projectSearchResponse
+	if err := c.get(ctx, "/rest/api/3/project/search", query, &resp); err != nil {
+		return nil, fmt.Errorf("list projects: %w", err)
+	}
+	return resp.Values, nil
+}
+
 // ProjectSpec describes a project to create.
 type ProjectSpec struct {
 	Key           string

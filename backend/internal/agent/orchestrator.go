@@ -179,6 +179,11 @@ type runState struct {
 	// and an iteration.
 	cache map[string]string
 
+	// checked records that the completeness check has already run. It fires at
+	// most once per run: the check exists to stop an answer that skipped a lead,
+	// not to argue with the model until it agrees.
+	checked bool
+
 	iterations   int
 	toolCalls    int
 	inputTokens  int
@@ -309,16 +314,44 @@ func (o *Orchestrator) begin(ctx context.Context, runID uuid.UUID) (*runState, b
 func (o *Orchestrator) investigate(ctx context.Context, state *runState) (answer string, forced bool, err error) {
 	definitions := o.registry.Definitions()
 
+	// pending carries a turn to inject on the next generation. It is threaded
+	// through the loop rather than appended directly so that generate() stays the
+	// single place a turn enters both the transcript and the event log.
+	var pending []llm.Message
+
 	for iteration := 1; iteration <= o.maxIterations; iteration++ {
 		state.iterations = iteration
 
-		resp, err := o.generate(ctx, state, iteration, PurposeAgentLoop, definitions)
+		purpose := PurposeAgentLoop
+		if len(pending) > 0 {
+			purpose = PurposeCompletenessCheck
+		}
+		resp, err := o.generate(ctx, state, iteration, purpose, definitions, pending...)
+		pending = nil
 		if err != nil {
 			return "", false, err
 		}
 
 		if len(resp.ToolCalls) == 0 {
 			if strings.TrimSpace(resp.Text) != "" {
+				if !state.checked {
+					// First answer of the run: check it against the question
+					// before accepting it.
+					//
+					// Both turns are queued as injections rather than appended
+					// here — the draft included. Appending the draft directly
+					// would put it in the transcript the model sees but in no
+					// event payload, and a run replayed from run_events would
+					// then be missing the very answer the check was reviewing.
+					// That is the invariant TEST-2.5 exists to protect, and it
+					// caught this.
+					state.checked = true
+					pending = []llm.Message{
+						{Role: llm.RoleAssistant, Content: resp.Text},
+						{Role: llm.RoleUser, Content: completenessCheckInstruction},
+					}
+					continue
+				}
 				return resp.Text, false, nil
 			}
 			// Neither an answer nor a tool call. An empty completion is a

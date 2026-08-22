@@ -1,6 +1,7 @@
 {
   "note": "Gmail fixtures, inserted with internalDateSource=dateHeader so each message keeps its own date. The 2026-06-08 Nordwind delay notice is the root cause of the Atlas launch slip and exists in no other source: Jira says only 'blocked on the provider', and the Notion plan names Nordwind without saying what they told us. {{me}} is replaced at seed time with the authenticated mailbox address, so no personal address is committed here.",
   "label": "Vantage Labs",
+  "probe": "Nordwind",
   "messages": [
     {
       "from": "Ines Brandt <ines.brandt@nordwindpayments.example>",

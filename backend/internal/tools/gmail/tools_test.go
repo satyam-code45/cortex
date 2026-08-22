@@ -425,3 +425,54 @@ func TestGmailToolSetIsReadOnly(t *testing.T) {
 		}
 	}
 }
+
+// BUG-3.D regression: the guidance that decides whether the third hop lands.
+//
+// Across three acceptance runs, only the one that read the Notion page before
+// searching reached the email at all — it had Ines Brandt's real address. The
+// run that searched first invented `subject:"sandbox delay" from:provider.com`:
+// a guessed domain and a subject phrase that does not exist, which matches
+// nothing in a mailbox that contains the answer. The empty-result observation at
+// the time made this worse by suggesting a retry with "a sender's domain alone".
+func TestSearchEmptyResultDoesNotRecommendGuessingASender(t *testing.T) {
+	fake := newFakeGmail(t, map[string]*route{
+		pathMessages: fixtureRoute("messages_empty.json"),
+	})
+	tool := fake.tool("gmail_search")
+
+	result, err := tool.Execute(t.Context(), json.RawMessage(`{"query":"from:provider.com subject:\"sandbox delay\""}`))
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	// It must steer the model off the two moves that actually failed.
+	for _, want := range []string{"from:", "drop that clause", "bare keyword"} {
+		if !strings.Contains(result.Content, want) {
+			t.Errorf("empty-result observation omits %q, so a guessed sender is never corrected:\n%s",
+				want, result.Content)
+		}
+	}
+	// And it must not suggest the guessed-domain retry that caused the failure.
+	if strings.Contains(result.Content, "domain alone") {
+		t.Errorf("empty-result observation still recommends retrying with a sender's domain:\n%s", result.Content)
+	}
+}
+
+// The search description is where selection is actually steered (REQ-3.4), so
+// the query guidance lives there and must stay there.
+func TestSearchDescriptionCarriesQueryGuidance(t *testing.T) {
+	fake := newFakeGmail(t, map[string]*route{})
+	tool := fake.tool("gmail_search")
+
+	description := tool.Description()
+	for _, want := range []string{
+		"whole words",  // subject:delay does not match "delayed"
+		"Never guess",  // no invented sender or domain
+		"bare keyword", // the recovery move
+		"days apart",   // one message is not the thread
+	} {
+		if !strings.Contains(description, want) {
+			t.Errorf("gmail_search description omits %q:\n%s", want, description)
+		}
+	}
+}

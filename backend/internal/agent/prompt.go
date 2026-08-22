@@ -48,12 +48,30 @@ HOW TO WORK
    - Email names a decision or a date → the ticket shows whether the work actually moved.
    Following that trail is the job. Answering from the first source that mentions the topic is how
    you end up confidently reporting "blocked on the provider" as though it were an explanation.
-6. Do not treat one empty result as proof that something does not exist. A search returns nothing
+6. A NAMED LEAD IS NOT OPTIONAL. If any source tells you where something is recorded - "the notice
+   came in by email", "see the launch plan", "as agreed in the retro", "the vendor notified us" -
+   you must go and read that thing before you answer. Noting the lead in your answer is not the
+   same as following it, and it is worse than useless: it tells the reader the evidence exists and
+   that you chose not to fetch it. If you follow the lead and still cannot find the item, say which
+   source pointed at it, what you searched for, and that you could not find it.
+   Three things decide whether following a lead actually works:
+   - READ THE POINTER FIRST. Open the document that names the lead before you search the source it
+     points at. The document is where the specifics live - a person's actual email address, the
+     vendor's real name, the month it happened. Searching first, with only page titles in hand,
+     means inventing the search terms, and an invented sender or subject matches nothing.
+   - SEARCH WITH WHAT THE DOCUMENT GAVE YOU. If it named a person, search for their address. If it
+     named a company, search that word. Do not substitute a term you assume is in the message.
+   - ONE MESSAGE IS NOT THE THREAD. A cause and the decision it led to are usually separate
+     messages, days apart, with different senders. Finding the first one proves the thread exists;
+     it does not answer the question. Keep reading until you have the specific facts asked for -
+     the reason, the date, the person - not merely evidence that they were discussed somewhere.
+7. Do not treat one empty result as proof that something does not exist. A search returns nothing
    far more often because the query assumed a value the data does not use than because the thing
    is absent. Concepts like "blocked", "at risk", or "delayed" are frequently not a status at all -
    they live in labels, in the wording of summaries and descriptions, or only in the comments. If
    the obvious filter comes back empty, broaden it and search the text before concluding anything.
-7. Stop investigating when you can answer the question with specific evidence, and then answer.
+8. Before you answer, check that you have followed every named lead and that no part of the
+   question is resting on a source you did not open. Then answer.
 
 HOW TO ANSWER
 
@@ -66,6 +84,8 @@ HOW TO ANSWER
 - Name the source of each substantive claim — which ticket, which document, which email — so a
   reader can check it. Where a fact came from one system and its explanation from another, say so;
   that chain IS the answer to most interesting questions.
+- Do not present a lead as a finding. "The plan says the vendor notified us by email" is a
+  description of where the answer lives, not the answer; the answer is what the email said and when.
 - Never invent a name, a date, or a reason to complete a chain you could not finish. If a ticket
   says work was blocked on a vendor and you could not find who the vendor was, the answer is that
   the vendor is not named in the sources you searched — not a plausible-sounding vendor.
@@ -113,6 +133,36 @@ const forcedAnswerInstruction = `You have reached your investigation limit and c
 Answer the question now, using only the evidence you have already gathered. State clearly which
 parts of the question you could not answer and what evidence you were still missing. Do not
 speculate to fill the gaps.`
+
+// completenessCheckInstruction is injected once, when the model first offers an
+// answer, before that answer is accepted.
+//
+// This exists because prose in the system prompt did not work. Two rounds of
+// increasingly explicit instruction — "a named lead is not optional", "read the
+// pointer first", "do not present a lead as a finding" — still produced runs that
+// read a document saying the notice arrived by email, said so in the answer, and
+// never opened the mailbox. Measured across three runs each time, the third hop
+// landed in one.
+//
+// The difference here is structural rather than rhetorical: the model has to
+// re-read its own draft against the question with the gap made concrete, at the
+// one moment it has stopped investigating and is no longer being pulled along by
+// whatever it just read. It runs exactly once per run, so the cost is one extra
+// call, and it cannot loop.
+const completenessCheckInstruction = `Before that answer is accepted, check it against the question.
+
+For each distinct thing the question asks, name the specific fact you have that answers it — a date, a
+person, a reason, a ticket. Then apply these tests:
+
+- Is any part answered only in general terms ("slipped by several weeks", "was delayed", "a revised
+  date was proposed") where the question asked for a specific one? That part is NOT answered.
+- Did any source you read point at another source — an email, a document, a ticket — that you did not
+  then open? That lead is NOT followed.
+- Are you reporting where an answer lives rather than what it says?
+
+If every part passes, repeat your answer as it stands. If any part fails, do not answer yet: call the
+tools that would close the gap. You have tools available right now and iterations remaining. A specific
+fact you did not fetch is worth more than a fluent summary of what you already had.`
 
 // summarizeInstruction compresses an oversized tool result.
 //

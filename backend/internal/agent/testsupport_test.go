@@ -143,7 +143,17 @@ func (p *fakeProvider) respond(call recordedCall) (llm.Response, error) {
 	}
 	p.mu.Unlock()
 
+	// The loop asks a model to re-read its own draft answer against the question
+	// before accepting it, so every scripted run that ends in an answer takes one
+	// more call than its script has steps for. A script that runs out at exactly
+	// that call is satisfied here by repeating the draft — which is the real
+	// "nothing was missing" path — so a test about dedupe or truncation does not
+	// have to carry a step about answer-checking. A script that runs out anywhere
+	// else is still the drift these tests exist to catch.
 	if exhausted {
+		if draft, ok := answerUnderReview(call); ok {
+			return llm.Response{Text: draft}, nil
+		}
 		p.t.Errorf("fakeProvider: unscripted call #%d (%s, %d messages)",
 			index+1, kindOf(call), len(call.messages))
 		return llm.Response{}, fmt.Errorf("fakeProvider: no scripted response for call %d", index+1)
@@ -163,6 +173,33 @@ func (p *fakeProvider) respond(call recordedCall) (llm.Response, error) {
 		InputTokens:  step.inputTokens,
 		OutputTokens: step.outputTokens,
 	}, nil
+}
+
+// completenessCheckMarker is a distinctive phrase from the injected
+// completeness-check instruction (see completenessCheckInstruction in prompt.go).
+const completenessCheckMarker = "Before that answer is accepted"
+
+// answerUnderReview reports whether this call is the completeness check, and if
+// so returns the draft answer it is reviewing — the assistant turn immediately
+// before the injected instruction.
+func answerUnderReview(call recordedCall) (string, bool) {
+	n := len(call.messages)
+	if n < 2 {
+		return "", false
+	}
+	last := call.messages[n-1]
+	// Matched by content, not by identity: this file is an external test package
+	// and cannot see the unexported instruction. The marker must stay in sync with
+	// completenessCheckInstruction in prompt.go — if it drifts, these tests fail
+	// loudly with "unscripted call" rather than quietly passing.
+	if last.Role != llm.RoleUser || !strings.Contains(last.Content, completenessCheckMarker) {
+		return "", false
+	}
+	draft := call.messages[n-2]
+	if draft.Role != llm.RoleAssistant {
+		return "", false
+	}
+	return draft.Content, true
 }
 
 func kindOf(call recordedCall) callKind {

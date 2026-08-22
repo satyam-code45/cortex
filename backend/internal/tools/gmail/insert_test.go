@@ -1,6 +1,7 @@
 package gmail
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -195,6 +196,63 @@ func TestEncodeAddress(t *testing.T) {
 
 			if got := encodeAddress(tc.input); got != tc.want {
 				t.Errorf("encodeAddress(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+// BUG-3.A regression: a seeded fixture must be reachable by an ordinary search.
+//
+// The Day 3 acceptance test failed with all sixteen fixtures present, correct,
+// and correctly dated, because they were inserted with only the custom
+// "Vantage Labs" label. Gmail put them in the mailbox but outside the scope a
+// normal query reaches — `Nordwind` returned nothing while `in:anywhere
+// Nordwind` returned everything — so the agent could not find the email hop no
+// matter how it phrased the search.
+//
+// The invariant that was missing: whatever else a fixture carries, it carries
+// INBOX.
+func TestFixtureLabelIDsAlwaysIncludeInbox(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		fixtureLabelID string
+		wantContains   []string
+		wantLen        int
+	}{
+		{
+			name:           "with a fixture label",
+			fixtureLabelID: "Label_8842",
+			wantContains:   []string{LabelInbox, LabelUnread, "Label_8842"},
+			wantLen:        3,
+		},
+		{
+			name:           "without a fixture label",
+			fixtureLabelID: "",
+			wantContains:   []string{LabelInbox, LabelUnread},
+			wantLen:        2,
+		},
+		{
+			name:           "a blank fixture label is not appended",
+			fixtureLabelID: "   ",
+			wantContains:   []string{LabelInbox, LabelUnread},
+			wantLen:        2,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := FixtureLabelIDs(tc.fixtureLabelID)
+			if len(got) != tc.wantLen {
+				t.Fatalf("FixtureLabelIDs(%q) = %v, want %d labels", tc.fixtureLabelID, got, tc.wantLen)
+			}
+			for _, want := range tc.wantContains {
+				if !slices.Contains(got, want) {
+					t.Errorf("FixtureLabelIDs(%q) = %v, missing %q", tc.fixtureLabelID, got, want)
+				}
 			}
 		})
 	}

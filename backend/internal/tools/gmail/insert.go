@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"mime"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -18,6 +19,41 @@ import (
 // it caused, or a question about what happened when has no answer to find.
 // messages.insert with internalDateSource=dateHeader honours the Date header we
 // write, so the timeline is real.
+
+// Gmail's system label ids. They are literal strings in the API, not opaque
+// ids that have to be looked up the way a user label does.
+const (
+	// LabelInbox is what makes a message reachable by an ordinary search.
+	//
+	// This is not cosmetic. A message inserted with only a custom label lands in
+	// the mailbox but outside the scope a normal query reaches: searching
+	// "Nordwind" finds nothing while `in:anywhere Nordwind` finds everything.
+	// The agent has no way to phrase its way out of that, so a fixture without
+	// INBOX is a fixture the agent cannot investigate — which is exactly how
+	// BUG-3.A blocked the Day 3 acceptance test.
+	LabelInbox = "INBOX"
+	// LabelUnread makes a seeded fixture read like mail that actually arrived.
+	LabelUnread = "UNREAD"
+	// LabelTrash and LabelSpam mark a message the operator has thrown away. A
+	// fixture in either is treated as absent, so deleting the fixtures and
+	// re-seeding is a repair path rather than a no-op.
+	LabelTrash = "TRASH"
+	LabelSpam  = "SPAM"
+)
+
+// FixtureLabelIDs returns the labels every seeded fixture must carry.
+//
+// INBOX first and unconditionally: the fixture label is how a graded run is
+// scoped, but INBOX is what makes the message exist as far as search is
+// concerned. Passing the fixture label alone is the bug this function exists to
+// make impossible.
+func FixtureLabelIDs(fixtureLabelID string) []string {
+	ids := []string{LabelInbox, LabelUnread}
+	if strings.TrimSpace(fixtureLabelID) != "" {
+		ids = append(ids, fixtureLabelID)
+	}
+	return ids
+}
 
 // FixtureMessage is one seeded email.
 type FixtureMessage struct {
@@ -158,40 +194,70 @@ func (c *Client) EnsureLabel(ctx context.Context, name string) (string, error) {
 	return created.ID, nil
 }
 
+// SeededMessage is what FindBySubject reports about an already-present fixture.
+type SeededMessage struct {
+	// ID is the Gmail message id.
+	ID string
+	// InInbox reports whether the message carries the INBOX label, and so
+	// whether an ordinary search can reach it at all.
+	InInbox bool
+}
+
 // FindBySubject reports whether a message with this exact subject already
 // exists, so a re-run of the seeder converges instead of inserting duplicates.
 //
 // Gmail has no natural key for an inserted message, and insert is not
 // idempotent: without this check, running the seeder twice produces two copies
 // of every fixture and an agent that cites whichever it happened to read.
-func (c *Client) FindBySubject(ctx context.Context, subject string) (string, bool, error) {
+//
+// The lookup deliberately uses in:anywhere: a fixture seeded before the INBOX
+// fix is invisible to a default query, and a duplicate check that cannot see it
+// would insert a second copy on every run.
+//
+// Trashed and spammed messages are then filtered back out. Emptying the Bin is
+// not instant — Gmail keeps a deleted message for 30 days — so without this,
+// "delete the fixtures and re-seed" does nothing at all: every message is still
+// found, every insert is skipped, and the operator is told to delete messages
+// they have already deleted.
+func (c *Client) FindBySubject(ctx context.Context, subject string) (*SeededMessage, bool, error) {
 	// Gmail has no escape syntax inside a quoted phrase, so %q — which would
 	// emit backslashes — silently matches nothing. Stripping the quotes is
 	// lossless here: the subject is read back and compared exactly below.
-	scoped, err := c.scopedQuery(`subject:"` + strings.ReplaceAll(subject, `"`, " ") + `"`)
+	scoped, err := c.scopedQuery(`in:anywhere subject:"` + strings.ReplaceAll(subject, `"`, " ") + `"`)
 	if err != nil {
-		return "", false, err
+		return nil, false, err
 	}
 	query := url.Values{}
 	query.Set("q", scoped)
 	query.Set("maxResults", "5")
+	query.Set("includeSpamTrash", "true")
 
 	var list listResponse
 	if err := c.get(ctx, "/gmail/v1/users/me/messages", query, &list); err != nil {
-		return "", false, err
+		return nil, false, err
 	}
 	// Gmail's subject: operator matches on words rather than the exact string,
 	// so a hit is confirmed by reading the subject back.
 	for _, ref := range list.Messages {
 		msg, err := c.getMessage(ctx, ref.ID, "metadata")
 		if err != nil {
-			return "", false, err
+			return nil, false, err
 		}
-		if strings.EqualFold(strings.TrimSpace(msg.subject()), strings.TrimSpace(subject)) {
-			return msg.ID, true, nil
+		if !strings.EqualFold(strings.TrimSpace(msg.subject()), strings.TrimSpace(subject)) {
+			continue
+		}
+		if slices.Contains(msg.LabelIDs, LabelTrash) || slices.Contains(msg.LabelIDs, LabelSpam) {
+			// Thrown away: treat it as gone and let the caller re-insert.
+			continue
+		}
+		{
+			return &SeededMessage{
+				ID:      msg.ID,
+				InInbox: slices.Contains(msg.LabelIDs, LabelInbox),
+			}, true, nil
 		}
 	}
-	return "", false, nil
+	return nil, false, nil
 }
 
 // profileResponse is the body of GET /gmail/v1/users/me/profile.
@@ -213,4 +279,27 @@ func (c *Client) UserEmail(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("gmail: the profile endpoint returned no address")
 	}
 	return profile.EmailAddress, nil
+}
+
+// CountMatching reports how many messages a query returns, without fetching any
+// of them.
+//
+// The seeder uses it to verify the invariant that actually matters: a fixture
+// must be findable by the kind of query the agent will type. Asserting on the
+// INBOX label instead is asserting on a proxy — and a proxy that, as it turned
+// out, can be false while search works perfectly well.
+func (c *Client) CountMatching(ctx context.Context, query string) (int, error) {
+	scoped, err := c.scopedQuery(query)
+	if err != nil {
+		return 0, err
+	}
+	q := url.Values{}
+	q.Set("q", scoped)
+	q.Set("maxResults", "50")
+
+	var list listResponse
+	if err := c.get(ctx, "/gmail/v1/users/me/messages", q, &list); err != nil {
+		return 0, err
+	}
+	return len(list.Messages), nil
 }

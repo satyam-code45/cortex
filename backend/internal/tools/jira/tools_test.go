@@ -498,22 +498,28 @@ func TestIssueToolsRejectInvalidKeys(t *testing.T) {
 	}
 }
 
-// The tool set is the four tools REQ-2.3 names, each with a schema the registry
-// accepts and a description the model can act on.
+// The tool set is the four tools REQ-2.3 names plus jira_list_projects, added
+// for BUG-3.C: without it a project key guessed from the question wording is
+// unrecoverable, because Jira answers an unknown key with zero results rather
+// than an error. Each has a schema the registry accepts and a description the
+// model can act on.
 func TestNewToolsSurface(t *testing.T) {
 	fake := newFakeJira(t, map[string]*route{})
 	client := fake.client()
 
 	list := jira.NewTools(client)
-	if len(list) != 4 {
-		t.Fatalf("NewTools returned %d tools, want 4", len(list))
+	if len(list) != 5 {
+		t.Fatalf("NewTools returned %d tools, want 5", len(list))
 	}
 
 	registry, err := tools.NewRegistry(list...)
 	if err != nil {
 		t.Fatalf("NewRegistry rejected the Jira tools: %v", err)
 	}
-	want := []string{"jira_get_comments", "jira_get_issue", "jira_get_issue_history", "jira_search_issues"}
+	want := []string{
+		"jira_get_comments", "jira_get_issue", "jira_get_issue_history",
+		"jira_list_projects", "jira_search_issues",
+	}
 	got := registry.Names()
 	if len(got) != len(want) {
 		t.Fatalf("registry names = %v, want %v", got, want)
@@ -540,11 +546,22 @@ func TestNewToolsSurface(t *testing.T) {
 		if schema.Type != "object" {
 			t.Errorf("tool %q schema type = %q, want object", def.Name, schema.Type)
 		}
-		if len(schema.Properties) == 0 {
-			t.Errorf("tool %q schema declares no properties", def.Name)
-		}
-		if len(schema.Required) == 0 {
-			t.Errorf("tool %q schema declares nothing required", def.Name)
+		// jira_list_projects genuinely takes no arguments — "what projects
+		// exist" has nothing to parameterize. Every other tool must declare its
+		// arguments and mark the ones it cannot work without, or the loop will
+		// happily execute a call that was missing them.
+		if def.Name == "jira_list_projects" {
+			if len(schema.Properties) != 0 || len(schema.Required) != 0 {
+				t.Errorf("tool %q takes no arguments, so it must declare neither properties nor required, got %v / %v",
+					def.Name, schema.Properties, schema.Required)
+			}
+		} else {
+			if len(schema.Properties) == 0 {
+				t.Errorf("tool %q schema declares no properties", def.Name)
+			}
+			if len(schema.Required) == 0 {
+				t.Errorf("tool %q schema declares nothing required", def.Name)
+			}
 		}
 		// Every documented argument must validate: the loop rejects a call
 		// against this schema before executing it.
@@ -596,5 +613,70 @@ func TestEveryToolPopulatesEvidence(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// BUG-3.C regression: the agent had no way to discover which projects exist.
+//
+// Run a3b7a833 opened with `project = PAYMENT`, a key invented from the wording
+// of the question. Jira answers an unknown key with zero results rather than an
+// error, so the run could not tell "this project does not exist" from "this
+// project has no such issues" and gave up with an empty answer.
+func TestListProjectsNamesTheKeysToSearch(t *testing.T) {
+	fake := newFakeJira(t, map[string]*route{
+		"/rest/api/3/project/search": bodyRoute(200, `{"isLast":true,"values":[
+			{"id":"10000","key":"ATLAS","name":"Atlas"},
+			{"id":"10001","key":"BEACON","name":"Beacon"},
+			{"id":"10002","key":"COMET","name":"Comet"}
+		]}`),
+	})
+	client, tool := fake.tool("jira_list_projects")
+
+	result, err := tool.Execute(t.Context(), json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	for _, key := range []string{"ATLAS", "BEACON", "COMET"} {
+		if !strings.Contains(result.Content, key) {
+			t.Errorf("content omits project key %q:\n%s", key, result.Content)
+		}
+	}
+	if !strings.Contains(result.Content, "Atlas") {
+		t.Errorf("content omits the project name, so a key cannot be matched to a subject:\n%s", result.Content)
+	}
+
+	if len(result.Evidence) != 3 {
+		t.Fatalf("got %d evidence items, want one per project", len(result.Evidence))
+	}
+	for _, item := range result.Evidence {
+		if item.Source != "jira" {
+			t.Errorf("evidence source = %q, want jira", item.Source)
+		}
+		if item.ExternalID == "" || item.URL == "" {
+			t.Errorf("evidence item %+v is missing an id or URL", item)
+		}
+	}
+	_ = client
+}
+
+// TestSearchEmptyResultWarnsAboutUnknownProjectKeys checks the other half of the
+// BUG-3.C fix: an empty result must not read as "no such issues" when the cause
+// may be a key that does not exist.
+func TestSearchEmptyResultWarnsAboutUnknownProjectKeys(t *testing.T) {
+	fake := newFakeJira(t, map[string]*route{
+		pathSearchJQL: fixtureRoute("search_jql_empty.json"),
+	})
+	_, tool := fake.tool("jira_search_issues")
+
+	result, err := tool.Execute(t.Context(), json.RawMessage(`{"jql":"project = PAYMENT"}`))
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	for _, want := range []string{"jira_list_projects", "does not exist"} {
+		if !strings.Contains(result.Content, want) {
+			t.Errorf("empty-result observation omits %q, so a guessed key reads as an empty project:\n%s",
+				want, result.Content)
+		}
 	}
 }

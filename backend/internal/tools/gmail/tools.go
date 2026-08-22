@@ -50,9 +50,19 @@ func (t *searchTool) Description() string {
 		"terms, a customer escalating — along with the internal threads where decisions were " +
 		"argued out before they were written down anywhere. When a ticket or a document says " +
 		"something was communicated, agreed, or announced but does not say what was said, the " +
-		"original is usually here. Supports from:, to:, subject:, after:/before: (YYYY/MM/DD), " +
-		"has:attachment, and quoted phrases, e.g. `from:vendor.com after:2026/05/01`. Returns " +
-		"one compact line per message; call gmail_get_message for the full text."
+		"original is usually here.\n" +
+		"WRITING THE QUERY: start with one or two distinctive words that would appear in the " +
+		"message itself — a company name, a product name, a person's actual address — not a " +
+		"phrase you expect to see in a subject line. Gmail matches whole words, so `subject:delay` " +
+		"does NOT match \"delayed\". Never guess a sender or a domain: filter on from: only with an " +
+		"address you have actually read somewhere. Operators (from:, to:, subject:, " +
+		"after:/before: as YYYY/MM/DD, has:attachment) are for narrowing a search that returns too " +
+		"much, not for the first attempt — an operator-heavy first query is the most common way to " +
+		"get zero results from a mailbox that contains the answer. If a query with operators " +
+		"returns nothing, retry with a single bare keyword before concluding anything.\n" +
+		"Returns one compact line per message; call gmail_get_message for the full text. One " +
+		"message is rarely the whole story — a cause and the decision it led to are usually " +
+		"separate messages, days apart."
 }
 
 func (t *searchTool) Schema() json.RawMessage {
@@ -107,11 +117,18 @@ func (t *searchTool) Execute(ctx context.Context, args json.RawMessage) (tools.R
 		// query as an empty mailbox.
 		return tools.Result{
 			Content: fmt.Sprintf("No messages matched the Gmail query: %s\n\n"+
-				"Note: this does not establish that no such mail exists. Gmail matches whole "+
-				"words and silently returns nothing for an operator it does not recognize or a "+
-				"date it cannot parse (dates must be YYYY/MM/DD). Before concluding there is "+
-				"nothing, retry with fewer terms — a sender's domain alone, or a single "+
-				"distinctive word — and widen the date range.", query),
+				"Note: this does not establish that no such mail exists, and an empty result is "+
+				"far more often a query problem than an empty mailbox.\n"+
+				"- A guessed sender or domain matches nothing. If this query used from: or to: "+
+				"with an address you have not actually read in a document or another message, "+
+				"drop that clause entirely.\n"+
+				"- Gmail matches whole words: subject:delay does not match \"delayed\". A subject "+
+				"phrase you expected rather than read will usually miss.\n"+
+				"- An unrecognized operator or a date that is not YYYY/MM/DD silently returns "+
+				"nothing rather than erroring.\n"+
+				"Retry with ONE distinctive bare keyword and no operators at all — a company "+
+				"name, a product name, a surname. If that also returns nothing, the mailbox "+
+				"genuinely has no such mail and you can say so.", query),
 			Evidence: []tools.EvidenceItem{},
 		}, nil
 	}
@@ -227,7 +244,10 @@ func (t *getMessageTool) Name() string { return "gmail_get_message" }
 func (t *getMessageTool) Description() string {
 	return "Read one email in full — headers plus the plain-text body — given a message id from " +
 		"gmail_search. Search returns only a one-line snippet, and the detail that matters " +
-		"(the reason given, the date promised, who was copied) is in the body."
+		"(the reason given, the date promised, who was copied) is in the body. Expect to read " +
+		"more than one: the message announcing a problem and the message deciding what to do " +
+		"about it are usually days apart and from different people, so reading only the first " +
+		"leaves the question half answered."
 }
 
 func (t *getMessageTool) Schema() json.RawMessage {

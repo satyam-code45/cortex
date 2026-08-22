@@ -36,8 +36,11 @@ const mePlaceholder = "{{me}}"
 
 // gmailFile is the shape of gmail.json.
 type gmailFile struct {
-	Note     string             `json:"note"`
-	Label    string             `json:"label"`
+	Note  string `json:"note"`
+	Label string `json:"label"`
+	// Probe is a plain query the seeder runs after writing, to prove the
+	// fixtures can be found the way the agent will look for them.
+	Probe    string             `json:"probe"`
 	Messages []gmailMessageSpec `json:"messages"`
 }
 
@@ -104,29 +107,42 @@ func runGmail(logger *slog.Logger, confirm bool, fixturesDir string) error {
 	}
 	logger.Info("authenticated to gmail", "mailbox", me)
 
-	var labelIDs []string
+	fixtureLabelID := ""
 	if strings.TrimSpace(file.Label) != "" {
-		labelID, err := client.EnsureLabel(ctx, file.Label)
+		id, err := client.EnsureLabel(ctx, file.Label)
 		if err != nil {
 			return err
 		}
-		labelIDs = append(labelIDs, labelID)
-		logger.Info("fixture label ready", "name", file.Label, "id", labelID)
+		fixtureLabelID = id
+		logger.Info("fixture label ready", "name", file.Label, "id", id)
 	}
+	// INBOX is included unconditionally. Without it a fixture is in the mailbox
+	// but unreachable by any ordinary search, which is what made the Day 3
+	// acceptance test fail with all sixteen messages present and correct.
+	labelIDs := gmail.FixtureLabelIDs(fixtureLabelID)
 
 	var inserted, skipped int
+	var unreachable []string
 	for i, spec := range file.Messages {
 		if ctx.Err() != nil {
 			return fmt.Errorf("gmail seed interrupted after %d messages: %w", inserted, ctx.Err())
 		}
 
-		existingID, exists, err := client.FindBySubject(ctx, spec.Subject)
+		existing, exists, err := client.FindBySubject(ctx, spec.Subject)
 		if err != nil {
 			return err
 		}
 		if exists {
 			skipped++
-			logger.Debug("message already seeded, skipping", "id", existingID, "subject", spec.Subject)
+			if !existing.InInbox {
+				// Seeded before the INBOX fix. Re-inserting would duplicate it
+				// and repairing it needs a write scope the token deliberately
+				// does not carry, so it is reported rather than silently skipped
+				// — a fixture the agent cannot find is worse than none.
+				unreachable = append(unreachable, spec.Subject)
+			}
+			logger.Debug("message already seeded, skipping",
+				"id", existing.ID, "subject", spec.Subject, "in_inbox", existing.InInbox)
 			continue
 		}
 
@@ -146,6 +162,50 @@ func runGmail(logger *slog.Logger, confirm bool, fixturesDir string) error {
 	}
 
 	logger.Info("gmail seed complete", "inserted", inserted, "skipped", skipped)
+
+	if len(unreachable) > 0 {
+		// Worth saying, not worth failing over. These predate the INBOX fix and
+		// cannot be repaired from here — the token carries no write scope beyond
+		// insert — but the probe below decides whether that actually matters.
+		logger.Warn("some fixtures predate the INBOX fix and are not in the inbox; "+
+			"they may still be searchable, in which case this is cosmetic",
+			"count", len(unreachable), "label", file.Label)
+	}
+
+	return verifyReachable(ctx, client, logger, file)
+}
+
+// verifyReachable checks that a seeded fixture can be found the way the agent
+// will look for it.
+//
+// This is the invariant BUG-3.A was really about, and the one no unit test could
+// have caught: the fixtures were present, correct, and correctly dated, and the
+// agent still could not see them. It is checked with an ordinary query — no
+// in:anywhere, no includeSpamTrash — because an ordinary query is all the agent
+// has.
+//
+// Gmail does not index an inserted message immediately, so an empty probe
+// moments after a seed may simply be early. The failure says so rather than
+// asserting the data is wrong.
+func verifyReachable(ctx context.Context, client *gmail.Client, logger *slog.Logger, file gmailFile) error {
+	probe := strings.TrimSpace(file.Probe)
+	if probe == "" {
+		return nil
+	}
+
+	count, err := client.CountMatching(ctx, probe)
+	if err != nil {
+		return fmt.Errorf("verify fixtures are searchable: %w", err)
+	}
+	if count == 0 {
+		return fmt.Errorf("seeded fixtures are not searchable: a plain query for %q returns nothing.\n"+
+			"They may still be indexing — Gmail does not make an inserted message searchable "+
+			"immediately. Wait a minute and re-run `make seed-gmail`; it re-probes without "+
+			"inserting anything.\n"+
+			"If it stays at zero the agent cannot reach the email hop, and the Day 3 acceptance "+
+			"test will fail however it phrases its search.", probe)
+	}
+	logger.Info("fixtures verified searchable by an ordinary query", "probe", probe, "matches", count)
 	return nil
 }
 
