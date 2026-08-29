@@ -67,6 +67,25 @@ type Response struct {
 	OutputTokens int
 }
 
+// Schema names a structured-output contract.
+//
+// Definition is a JSON Schema object. It is sent in strict mode, which the
+// OpenAI API only accepts for a restricted subset of JSON Schema: every property
+// must appear in "required", and every object must set
+// "additionalProperties": false. A schema that violates either is rejected at
+// request time rather than producing a loosely-conforming answer, which is the
+// behaviour we want — a citation payload that is missing a field is worse than
+// no citation pass at all.
+type Schema struct {
+	// Name identifies the schema to the provider. Letters, digits, underscores
+	// and dashes only.
+	Name string
+	// Description tells the model what the shape is for.
+	Description string
+	// Definition is the JSON Schema object itself.
+	Definition json.RawMessage
+}
+
 // Provider is the interface every LLM backend implements.
 type Provider interface {
 	// Generate produces a text completion.
@@ -74,6 +93,11 @@ type Provider interface {
 	// GenerateWithTools produces either a text completion or a set of tool
 	// calls, given the tools the model is allowed to use.
 	GenerateWithTools(ctx context.Context, req Request, tools []ToolDef) (Response, error)
+	// GenerateStructured produces a completion constrained to schema.
+	// Response.Text is the JSON document; it is guaranteed to parse against the
+	// schema only insofar as the provider enforces strict mode, so callers still
+	// decode defensively.
+	GenerateStructured(ctx context.Context, req Request, schema Schema) (Response, error)
 	// Embed returns one embedding vector per input text, in input order.
 	Embed(ctx context.Context, texts []string) ([][]float32, error)
 }

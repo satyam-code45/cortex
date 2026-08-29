@@ -38,6 +38,11 @@ type DB interface {
 // the rollback path can be exercised with a fake that just returns an error.
 type Enqueuer interface {
 	EnqueueAgentRun(ctx context.Context, tx pgx.Tx, runID uuid.UUID) error
+
+	// EnqueueIndexSource queues a reindex of one source. It takes no
+	// transaction: the admin endpoint writes no rows of its own, so there is
+	// nothing for the enqueue to commit alongside.
+	EnqueueIndexSource(ctx context.Context, source string) error
 }
 
 // Deps are the collaborators the handlers need.
@@ -53,6 +58,9 @@ type Deps struct {
 	Model string
 	// DevUserEmail identifies the single hardcoded user; real auth lands later.
 	DevUserEmail string
+	// IndexSources are the source names POST /api/admin/index accepts. Empty
+	// disables the endpoint, which is what a build with no indexer wants.
+	IndexSources []string
 	// Logger receives request and handler logs.
 	Logger *slog.Logger
 }
@@ -79,6 +87,8 @@ func NewRouter(deps Deps) http.Handler {
 	r.Route("/api", func(r chi.Router) {
 		r.Post("/chat", s.handleChat)
 		r.Get("/runs/{id}", s.handleGetRun)
+		r.Get("/runs/{id}/trace", s.handleGetRunTrace)
+		r.Post("/admin/index", s.handleAdminIndex)
 	})
 	return r
 }

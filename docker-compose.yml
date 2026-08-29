@@ -3,7 +3,10 @@ services:
     image: pgvector/pgvector:pg16
     container_name: cortex-db
     ports:
-      - "5432:5432"
+      # The host port is overridable so this can coexist with another project's
+      # Postgres already holding 5432. Default unchanged; set POSTGRES_PORT (and
+      # the port in DATABASE_URL / TEST_DATABASE_URL) to move it.
+      - "${POSTGRES_PORT:-5432}:5432"
     environment:
       POSTGRES_USER: cortex
       POSTGRES_PASSWORD: cortex

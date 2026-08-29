@@ -125,8 +125,10 @@ func TestCompletenessCheckRunsOnlyOnce(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if got := provider.callCount(); got != 3 {
-		t.Errorf("provider calls = %d, want 3 — a second check would mean the guard is unbounded", got)
+	// Three loop calls plus the Day 4 citation pass. A fifth would mean a second
+	// completeness check, i.e. an unbounded guard.
+	if got := provider.callCount(); got != 4 {
+		t.Errorf("provider calls = %d, want 4 (two drafts, one check, one citation pass)", got)
 	}
 	if run := loadRun(t, pool, seeded.runID); run.answer == nil || *run.answer != "second draft" {
 		t.Errorf("answer = %v, want %q", run.answer, "second draft")

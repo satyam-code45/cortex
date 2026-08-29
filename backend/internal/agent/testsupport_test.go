@@ -38,15 +38,17 @@ import (
 // scripted provider
 // ---------------------------------------------------------------------------
 
-// callKind distinguishes the two provider entry points the loop uses:
+// callKind distinguishes the three provider entry points the loop uses:
 // GenerateWithTools for a reasoning turn, Generate for the utility-model
-// summary and for the forced final answer.
+// summary and for the forced final answer, and GenerateStructured for the
+// Day 4 citation pass.
 type callKind int
 
 const (
 	anyCall callKind = iota
 	toolsCall
 	plainCall
+	structuredCall
 )
 
 func (k callKind) String() string {
@@ -55,6 +57,8 @@ func (k callKind) String() string {
 		return "GenerateWithTools"
 	case plainCall:
 		return "Generate"
+	case structuredCall:
+		return "GenerateStructured"
 	default:
 		return "any"
 	}
@@ -82,6 +86,8 @@ type recordedCall struct {
 	system    string
 	messages  []llm.Message
 	tools     []llm.ToolDef
+	// schema is set when the loop asked for structured output.
+	schema *llm.Schema
 }
 
 // fakeProvider replays a queued sequence of responses and records every request
@@ -121,6 +127,15 @@ func (p *fakeProvider) GenerateWithTools(_ context.Context, req llm.Request, def
 	})
 }
 
+func (p *fakeProvider) GenerateStructured(_ context.Context, req llm.Request, schema llm.Schema) (llm.Response, error) {
+	return p.respond(recordedCall{
+		model:    req.Model,
+		system:   req.System,
+		messages: cloneMessages(req.Messages),
+		schema:   &schema,
+	})
+}
+
 func (p *fakeProvider) Embed(_ context.Context, _ []string) ([][]float32, error) {
 	p.t.Error("fakeProvider: Embed called; the agent loop must not embed")
 	return nil, errors.New("fakeProvider: Embed is not scripted")
@@ -151,6 +166,14 @@ func (p *fakeProvider) respond(call recordedCall) (llm.Response, error) {
 	// have to carry a step about answer-checking. A script that runs out anywhere
 	// else is still the drift these tests exist to catch.
 	if exhausted {
+		// The Day 4 citation pass runs after every answered run, and its shape
+		// is the same for every test that is not about citations: echo the draft
+		// back with nothing cited. Scripting it into thirty unrelated tests would
+		// be noise, so the default is supplied here and a citation test overrides
+		// it with an explicit step.
+		if call.schema != nil {
+			return llm.Response{Text: uncitedResponse(call)}, nil
+		}
 		if draft, ok := answerUnderReview(call); ok {
 			return llm.Response{Text: draft}, nil
 		}
@@ -202,11 +225,35 @@ func answerUnderReview(call recordedCall) (string, bool) {
 	return draft.Content, true
 }
 
-func kindOf(call recordedCall) callKind {
-	if call.withTools {
-		return toolsCall
+// uncitedResponse builds the citation pass's "nothing to cite" reply: the draft
+// answer, unchanged, with an empty citation list.
+func uncitedResponse(call recordedCall) string {
+	draft := ""
+	for i := len(call.messages) - 1; i >= 0; i-- {
+		if call.messages[i].Role == llm.RoleAssistant {
+			draft = call.messages[i].Content
+			break
+		}
 	}
-	return plainCall
+	encoded, err := json.Marshal(map[string]any{
+		"answer_markdown": draft,
+		"citations":       []any{},
+	})
+	if err != nil {
+		return `{"answer_markdown":"","citations":[]}`
+	}
+	return string(encoded)
+}
+
+func kindOf(call recordedCall) callKind {
+	switch {
+	case call.schema != nil:
+		return structuredCall
+	case call.withTools:
+		return toolsCall
+	default:
+		return plainCall
+	}
 }
 
 func (p *fakeProvider) callCount() int {

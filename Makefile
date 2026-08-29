@@ -1,6 +1,9 @@
 -include .env
 export
 
+# PORT has a default here as well as in internal/config: `make index` curls the
+# running server, and an unset PORT would otherwise build the URL "localhost:/...".
+PORT ?= 8080
 DATABASE_URL ?= postgres://cortex:cortex@localhost:5432/cortex?sslmode=disable
 TEST_DATABASE_URL ?= postgres://cortex:cortex@localhost:5432/cortex_test?sslmode=disable
 
@@ -60,5 +63,8 @@ gmail-auth: ## authorize Gmail once and cache the refresh token
 eval: ## run the evaluation suite
 	cd backend && go run ./cmd/eval
 
+# The Content-Type header is required, not decorative: the endpoint rejects a
+# request without it, which is what forces a browser to preflight it and stops
+# any page you happen to be visiting from queueing crawls at your local server.
 index: ## trigger reindexing of all sources into the vector store
-	curl -s -X POST localhost:$(PORT)/api/admin/index
+	curl -sS -f -X POST -H 'Content-Type: application/json' -d '{}' localhost:$(PORT)/api/admin/index

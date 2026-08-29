@@ -27,6 +27,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"cortex/internal/llm"
 	"cortex/internal/store"
@@ -177,7 +178,13 @@ type runState struct {
 	// often — usually after a long observation pushes the earlier result out of
 	// their attention — and each repeat would otherwise cost a Jira round trip
 	// and an iteration.
-	cache map[string]string
+	//
+	// The evidence is cached alongside the observation, not just the text. A
+	// cache hit is still a tool call and still gets a tool_calls row, and a row
+	// claiming zero evidence for a call that handed the model three citable
+	// documents would make the trace lie. Re-registering the evidence is free:
+	// the (run, source, external_id) constraint makes the insert idempotent.
+	cache map[string]cachedResult
 
 	// checked records that the completeness check has already run. It fires at
 	// most once per run: the check exists to stop an answer that skipped a lead,
@@ -188,6 +195,13 @@ type runState struct {
 	toolCalls    int
 	inputTokens  int
 	outputTokens int
+}
+
+// cachedResult is a tool result already produced this run.
+type cachedResult struct {
+	observation string
+	evidence    []tools.EvidenceItem
+	summary     string
 }
 
 // Run executes the agent loop for one queued run.
@@ -217,7 +231,12 @@ func (o *Orchestrator) Run(ctx context.Context, runID uuid.UUID) error {
 		return nil
 	}
 
-	if err := o.complete(ctx, state, answer, forced); err != nil {
+	// The citation pass runs between the investigation and the write-back. It
+	// cannot fail the run: cite degrades to the uncited draft and says why on the
+	// outcome, because a dozen paid LLM calls have already been spent by here.
+	cited := o.cite(ctx, state, answer)
+
+	if err := o.complete(ctx, state, cited, forced); err != nil {
 		// The answer exists but could not be stored. Drive the run to a terminal
 		// state anyway: a row left 'running' with no finished_at is
 		// indistinguishable from one still in flight, forever.
@@ -261,7 +280,7 @@ func (o *Orchestrator) begin(ctx context.Context, runID uuid.UUID) (*runState, b
 	state := &runState{
 		runID:   runID,
 		started: o.now(),
-		cache:   make(map[string]string),
+		cache:   make(map[string]cachedResult),
 	}
 
 	claimed := true
@@ -565,6 +584,7 @@ func (o *Orchestrator) runTool(ctx context.Context, state *runState, iteration i
 	}
 
 	finish := func(observation, status, errText string, opts toolOutcome) (string, error) {
+		latencyMS := o.now().Sub(start).Milliseconds()
 		payload := toolCallFinishedPayload{
 			Iteration:        iteration,
 			ToolCallID:       call.ID,
@@ -574,14 +594,22 @@ func (o *Orchestrator) runTool(ctx context.Context, state *runState, iteration i
 			Truncated:        opts.truncated,
 			Summarized:       opts.summarized,
 			EvidenceCount:    len(opts.evidence),
-			Evidence:         opts.evidence,
+			Evidence:         toEventEvidence(opts.evidence),
 			Status:           status,
 			Error:            errText,
 			CacheHit:         opts.cacheHit,
-			LatencyMS:        o.now().Sub(start).Milliseconds(),
+			LatencyMS:        latencyMS,
 		}
+		// The event, the tool_calls row and the evidence rows are written in one
+		// transaction. They are three views of a single fact, and a citation that
+		// resolves to an evidence row the transcript never mentions — or a
+		// transcript entry whose evidence was lost — is worse than either being
+		// absent.
 		if err := o.withTx(ctx, func(q store.Querier) error {
-			return appendEvent(ctx, q, state.runID, EventToolCallFinished, payload)
+			if err := appendEvent(ctx, q, state.runID, EventToolCallFinished, payload); err != nil {
+				return err
+			}
+			return o.recordToolCall(ctx, q, state, call, observation, status, errText, latencyMS, opts)
 		}); err != nil {
 			return "", fmt.Errorf("record tool call finish: %w", err)
 		}
@@ -607,7 +635,12 @@ func (o *Orchestrator) runTool(ctx context.Context, state *runState, iteration i
 
 	cacheKey := call.Name + "|" + canonical
 	if cached, hit := state.cache[cacheKey]; hit {
-		return finish(cached, "ok", "", toolOutcome{cacheHit: true, rawLength: len(cached)})
+		return finish(cached.observation, "ok", "", toolOutcome{
+			cacheHit:  true,
+			rawLength: len(cached.observation),
+			evidence:  cached.evidence,
+			summary:   cached.summary,
+		})
 	}
 
 	result, execErr := o.executeWithRetry(ctx, tool, call.Arguments)
@@ -632,8 +665,125 @@ func (o *Orchestrator) runTool(ctx context.Context, state *runState, iteration i
 	// observation and the replayed one are byte-identical; the dedupe cache holds
 	// the fenced form for the same reason.
 	observation = fenceUntrusted(tool.Name(), observation)
-	state.cache[cacheKey] = observation
+	state.cache[cacheKey] = cachedResult{
+		observation: observation,
+		evidence:    outcome.evidence,
+		summary:     outcome.summary,
+	}
 	return finish(observation, "ok", "", outcome)
+}
+
+// recordToolCall writes the tool_calls row and its evidence rows.
+//
+// tool_calls duplicates what the run_events transcript already holds, on
+// purpose: the transcript is an append-only log meant to be replayed in order,
+// while this is the queryable projection the trace endpoint and any later
+// "which tools fail most?" question read. Storing a short result_summary rather
+// than the whole observation keeps that projection cheap to scan; the full text
+// stays in the event.
+func (o *Orchestrator) recordToolCall(
+	ctx context.Context,
+	q store.Querier,
+	state *runState,
+	call llm.ToolCall,
+	observation, status, errText string,
+	latencyMS int64,
+	opts toolOutcome,
+) error {
+	summary := opts.summary
+	if summary == "" {
+		summary = observation
+	}
+	summary = tools.Snippet(summary)
+	latency := int32(latencyMS)
+
+	params := store.InsertToolCallParams{
+		AgentRunID:    state.runID,
+		ToolName:      call.Name,
+		Arguments:     normalizeArgs(call.Arguments),
+		EvidenceCount: int32(len(opts.evidence)),
+		LatencyMs:     &latency,
+		Status:        status,
+	}
+	if summary != "" {
+		params.ResultSummary = &summary
+	}
+	if errText != "" {
+		params.Error = &errText
+	}
+
+	row, err := q.InsertToolCall(ctx, params)
+	if err != nil {
+		return fmt.Errorf("insert tool call: %w", err)
+	}
+
+	for _, item := range opts.evidence {
+		stored, err := insertEvidence(ctx, q, state.runID, row.ID, item)
+		if err != nil {
+			return err
+		}
+		if !stored {
+			// A tool whose evidence is systematically unidentifiable loses every
+			// citation it could have supported, and would do so in total silence.
+			o.logger.Warn("agent: dropped unidentifiable evidence",
+				"run_id", state.runID, "tool", call.Name,
+				"source", item.Source, "title", item.Title)
+		}
+	}
+	return nil
+}
+
+// insertEvidence stores one citable item, assigning it this run's next citation
+// number (or reusing the number the item already has — see db/queries/evidence.sql).
+// It reports whether a row was stored; false means the item was unidentifiable
+// and dropped, which the caller logs.
+func insertEvidence(ctx context.Context, q store.Querier, runID, toolCallID uuid.UUID, item tools.EvidenceItem) (bool, error) {
+	externalID := evidenceKey(item)
+	if item.Source == "" || externalID == "" {
+		// Unidentifiable evidence cannot be deduplicated, so every such item
+		// would collide on (run, source, "") and silently overwrite the previous
+		// one's tool_call_id. Dropping it is honest; a citation pointing at
+		// "some document" is not worth a row.
+		return false, nil
+	}
+
+	params := store.InsertEvidenceParams{
+		AgentRunID: runID,
+		ToolCallID: &toolCallID,
+		Source:     item.Source,
+		ExternalID: externalID,
+	}
+	if item.Title != "" {
+		params.Title = &item.Title
+	}
+	if item.URL != "" {
+		params.Url = &item.URL
+	}
+	if item.Snippet != "" {
+		params.Snippet = &item.Snippet
+	}
+	if item.Timestamp != nil {
+		params.SourceTimestamp = pgtype.Timestamptz{Time: item.Timestamp.UTC(), Valid: true}
+	}
+
+	if _, err := q.InsertEvidence(ctx, params); err != nil {
+		return false, fmt.Errorf("insert evidence %s/%s: %w", item.Source, externalID, err)
+	}
+	return true, nil
+}
+
+// evidenceKey is the identity an evidence item is deduplicated by within a run.
+//
+// ExternalID is what every tool sets, but it is not enforced by the type, and an
+// empty one would make two unrelated documents look like the same row. The URL
+// is the next-best stable identifier; the title is a last resort.
+func evidenceKey(item tools.EvidenceItem) string {
+	for _, candidate := range []string{item.ExternalID, item.URL, item.Title} {
+		if trimmed := strings.TrimSpace(candidate); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 // fenceUntrusted wraps a tool result so the model can tell data from
@@ -644,9 +794,19 @@ func (o *Orchestrator) runTool(ctx context.Context, state *runState, iteration i
 // content cannot terminate its own fence and impersonate the transcript around
 // it.
 func fenceUntrusted(toolName, content string) string {
-	safe := strings.ReplaceAll(content, "</tool_result>", "<\u2215tool_result>")
-	return fmt.Sprintf("<tool_result tool=%q trust=%q>\n", toolName, "untrusted") +
-		safe + "\n</tool_result>"
+	return fence("tool_result", fmt.Sprintf(" tool=%q", toolName), content)
+}
+
+// fence wraps third-party content in a labelled, self-terminating block.
+//
+// Shared by the tool observations and by the citation pass's evidence list, so
+// both get the same guarantee: the content cannot close its own fence and
+// impersonate the transcript around it. Any closing tag inside is defanged with
+// a division slash, which reads identically to a human and is not the tag.
+func fence(tag, attrs, content string) string {
+	closing := "</" + tag + ">"
+	safe := strings.ReplaceAll(content, closing, "<\u2215"+tag+">")
+	return fmt.Sprintf("<%s%s trust=%q>\n", tag, attrs, "untrusted") + safe + "\n" + closing
 }
 
 // toolOutcome carries the bookkeeping fields of a finished tool call.
@@ -655,7 +815,16 @@ type toolOutcome struct {
 	truncated  bool
 	summarized bool
 	cacheHit   bool
-	evidence   []eventEvidence
+	// evidence is the tool's own items, not the event-payload form. The
+	// conversion happens once, in finish, so the event payload and the evidence
+	// rows are written from the same values.
+	evidence []tools.EvidenceItem
+	// summary is what tool_calls.result_summary stores. It is set from the
+	// result BEFORE the untrusted fence is wrapped around it: the fence is ~60
+	// characters of our own boilerplate, and letting it eat a 300-character
+	// summary would leave a trace showing the same tag on every row and almost
+	// none of what the tool actually returned.
+	summary string
 }
 
 // executeWithRetry runs a tool under its own timeout, retrying once when the
@@ -722,7 +891,8 @@ func isRetryable(err error) bool {
 func (o *Orchestrator) fitToContext(ctx context.Context, state *runState, iteration int, result tools.Result) (string, toolOutcome) {
 	outcome := toolOutcome{
 		rawLength: len(result.Content),
-		evidence:  toEventEvidence(result.Evidence),
+		evidence:  result.Evidence,
+		summary:   result.Content,
 	}
 
 	runes := []rune(result.Content)
@@ -773,8 +943,9 @@ func (o *Orchestrator) fitToContext(ctx context.Context, state *runState, iterat
 		head, len([]rune(overflow)), summary), outcome
 }
 
-// complete stores the answer and the terminal run state.
-func (o *Orchestrator) complete(ctx context.Context, state *runState, answer string, forced bool) error {
+// complete stores the cited answer and the terminal run state.
+func (o *Orchestrator) complete(ctx context.Context, state *runState, cited citationOutcome, forced bool) error {
+	answer := cited.Answer
 	latency := o.now().Sub(state.started)
 	latencyMS := int32(latency.Milliseconds())
 	inputTokens := int32(state.inputTokens)
@@ -792,6 +963,9 @@ func (o *Orchestrator) complete(ctx context.Context, state *runState, answer str
 			Content:        answer,
 		}); err != nil {
 			return fmt.Errorf("insert assistant message: %w", err)
+		}
+		if err := o.recordCitations(persistCtx, q, state, cited); err != nil {
+			return err
 		}
 		if err := appendEvent(persistCtx, q, state.runID, EventAnswer, answerPayload{
 			Answer:     answer,
@@ -823,6 +997,42 @@ func (o *Orchestrator) complete(ctx context.Context, state *runState, answer str
 		}
 		return nil
 	})
+}
+
+// recordCitations persists the citation rows and the citations event.
+//
+// It shares complete's transaction: the answer text carries [n] markers, and a
+// marker whose row was never written points at nothing. Either both land or
+// neither does.
+func (o *Orchestrator) recordCitations(ctx context.Context, q store.Querier, state *runState, cited citationOutcome) error {
+	payload := citationsPayload{
+		Citations: make([]eventCitation, 0, len(cited.Citations)),
+		Dropped:   cited.Dropped,
+		Evidence:  cited.EvidenceCount,
+		Skipped:   cited.Skipped,
+	}
+
+	for _, c := range cited.Citations {
+		claim := c.Claim
+		params := store.InsertCitationParams{
+			AgentRunID: state.runID,
+			EvidenceID: c.EvidenceID,
+			Marker:     c.Marker,
+		}
+		if claim != "" {
+			params.ClaimText = &claim
+		}
+		if _, err := q.InsertCitation(ctx, params); err != nil {
+			return fmt.Errorf("insert citation %s: %w", c.Marker, err)
+		}
+		payload.Citations = append(payload.Citations, eventCitation{
+			Marker:      c.Marker,
+			EvidenceID:  c.EvidenceID,
+			EvidenceSeq: c.EvidenceSeq,
+			Claim:       c.Claim,
+		})
+	}
+	return appendEvent(ctx, q, state.runID, EventCitations, payload)
 }
 
 // fail records a failed run.
@@ -861,22 +1071,7 @@ func (o *Orchestrator) fail(ctx context.Context, state *runState, reason string)
 // connection for the whole multi-second call, and a twelve-iteration run would
 // hold it for minutes.
 func (o *Orchestrator) withTx(ctx context.Context, fn func(q store.Querier) error) error {
-	tx, err := o.db.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	// Roll back on a context that cannot already be cancelled: pgx destroys the
-	// connection outright when it cannot send the ROLLBACK, forcing a fresh
-	// handshake instead of returning it to the pool.
-	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // no-op once committed
-
-	if err := fn(store.New(tx)); err != nil {
-		return err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
-	}
-	return nil
+	return store.WithTx(ctx, o.db, fn)
 }
 
 // normalizeArgs makes model-produced arguments safe to store as jsonb. An

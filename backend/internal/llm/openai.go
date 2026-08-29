@@ -68,17 +68,29 @@ func NewOpenAI(cfg OpenAIConfig) *OpenAI {
 
 // Generate produces a text completion.
 func (o *OpenAI) Generate(ctx context.Context, req Request) (Response, error) {
-	return o.complete(ctx, req, nil)
+	return o.complete(ctx, req, nil, nil)
 }
 
 // GenerateWithTools produces either a text completion or a set of tool calls.
 func (o *OpenAI) GenerateWithTools(ctx context.Context, req Request, tools []ToolDef) (Response, error) {
-	return o.complete(ctx, req, tools)
+	return o.complete(ctx, req, tools, nil)
 }
 
-// complete is the single code path behind Generate and GenerateWithTools; the
-// only difference between them is whether tool definitions are attached.
-func (o *OpenAI) complete(ctx context.Context, req Request, tools []ToolDef) (Response, error) {
+// GenerateStructured produces a completion constrained to a JSON Schema.
+//
+// Strict mode is requested rather than merely asking for JSON in the prompt:
+// the caller (the citation pass) has to decode the result into a fixed shape,
+// and a model that returns prose around its JSON, or renames a field, turns a
+// recoverable step into a parse error. Strict mode makes the provider enforce
+// the shape server-side.
+func (o *OpenAI) GenerateStructured(ctx context.Context, req Request, schema Schema) (Response, error) {
+	return o.complete(ctx, req, nil, &schema)
+}
+
+// complete is the single code path behind Generate, GenerateWithTools and
+// GenerateStructured; they differ only in whether tool definitions or a
+// response-format schema are attached.
+func (o *OpenAI) complete(ctx context.Context, req Request, tools []ToolDef, schema *Schema) (Response, error) {
 	messages, err := o.buildMessages(req)
 	if err != nil {
 		return Response{}, err
@@ -96,6 +108,13 @@ func (o *OpenAI) complete(ctx context.Context, req Request, tools []ToolDef) (Re
 		if err != nil {
 			return Response{}, err
 		}
+	}
+	if schema != nil {
+		format, err := responseFormat(*schema)
+		if err != nil {
+			return Response{}, err
+		}
+		params.ResponseFormat = format
 	}
 
 	completion, err := o.client.Chat.Completions.New(ctx, params)
@@ -176,6 +195,30 @@ func assistantMessage(m Message) openai.ChatCompletionMessageParamUnion {
 		})
 	}
 	return openai.ChatCompletionMessageParamUnion{OfAssistant: &param}
+}
+
+// responseFormat converts a Schema into the SDK's response_format param.
+func responseFormat(schema Schema) (openai.ChatCompletionNewParamsResponseFormatUnion, error) {
+	var zero openai.ChatCompletionNewParamsResponseFormatUnion
+	if schema.Name == "" {
+		return zero, fmt.Errorf("openai: structured output requires a schema name")
+	}
+	var definition map[string]any
+	if err := json.Unmarshal(schema.Definition, &definition); err != nil {
+		return zero, fmt.Errorf("openai: schema %q is not a valid JSON Schema object: %w", schema.Name, err)
+	}
+
+	param := shared.ResponseFormatJSONSchemaJSONSchemaParam{
+		Name:   schema.Name,
+		Schema: definition,
+		Strict: openai.Bool(true),
+	}
+	if schema.Description != "" {
+		param.Description = openai.String(schema.Description)
+	}
+	return openai.ChatCompletionNewParamsResponseFormatUnion{
+		OfJSONSchema: &shared.ResponseFormatJSONSchemaParam{JSONSchema: param},
+	}, nil
 }
 
 // toolParams converts tool definitions into SDK function-tool params.

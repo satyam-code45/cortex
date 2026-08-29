@@ -461,17 +461,12 @@ func (t *getCommentsTool) Execute(ctx context.Context, args json.RawMessage) (to
 		return tools.Result{}, err
 	}
 
-	query := url.Values{}
-	query.Set("maxResults", strconv.Itoa(maxCommentsFetched))
-	query.Set("orderBy", "created")
-
-	var comments commentsResponse
-	path := "/rest/api/3/issue/" + url.PathEscape(key) + "/comment"
-	if err := t.client.get(ctx, path, query, &comments); err != nil {
-		return tools.Result{}, fmt.Errorf("get comments for %s: %w", key, err)
+	comments, total, err := t.client.fetchComments(ctx, key)
+	if err != nil {
+		return tools.Result{}, err
 	}
 
-	if len(comments.Comments) == 0 {
+	if len(comments) == 0 {
 		return tools.Result{
 			Content:  fmt.Sprintf("%s has no comments.", key),
 			Evidence: []tools.EvidenceItem{},
@@ -479,10 +474,10 @@ func (t *getCommentsTool) Execute(ctx context.Context, args json.RawMessage) (to
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "Comments on %s (%d):\n", key, len(comments.Comments))
-	evidence := make([]tools.EvidenceItem, 0, len(comments.Comments))
+	fmt.Fprintf(&b, "Comments on %s (%d):\n", key, len(comments))
+	evidence := make([]tools.EvidenceItem, 0, len(comments))
 
-	for i, c := range comments.Comments {
+	for i, c := range comments {
 		body := ADFToText(c.Body)
 		author := c.Author.display("unknown")
 		date := formatDate(c.Created)
@@ -496,11 +491,35 @@ func (t *getCommentsTool) Execute(ctx context.Context, args json.RawMessage) (to
 			Timestamp:  parseJiraTime(c.Created),
 		})
 	}
-	if comments.Total > len(comments.Comments) {
-		fmt.Fprintf(&b, "(showing %d of %d comments)\n", len(comments.Comments), comments.Total)
+	if total > len(comments) {
+		fmt.Fprintf(&b, "(showing %d of %d comments)\n", len(comments), total)
 	}
 
 	return tools.Result{Content: strings.TrimRight(b.String(), "\n"), Evidence: evidence}, nil
+}
+
+// fetchComments reads one issue's comment thread, oldest first, and reports the
+// thread's true length alongside the page it fetched.
+//
+// Shared with the indexing crawl (index.go), which folds the same thread into
+// the issue's indexed document. Two implementations would mean the archived copy
+// of a discussion could differ from the one the agent reads live.
+//
+// The total is returned rather than inferred from len(comments) == maxResults:
+// the model is told "one message is not the thread" and asked to keep reading,
+// so the difference between "50 comments" and "50 of 214" is a fact it acts on,
+// and a thread of exactly 50 must not be reported as truncated.
+func (c *Client) fetchComments(ctx context.Context, key string) ([]comment, int, error) {
+	query := url.Values{}
+	query.Set("maxResults", strconv.Itoa(maxCommentsFetched))
+	query.Set("orderBy", "created")
+
+	var resp commentsResponse
+	path := "/rest/api/3/issue/" + url.PathEscape(key) + "/comment"
+	if err := c.get(ctx, path, query, &resp); err != nil {
+		return nil, 0, fmt.Errorf("get comments for %s: %w", key, err)
+	}
+	return resp.Comments, resp.Total, nil
 }
 
 // ---------------------------------------------------------------------------

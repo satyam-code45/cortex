@@ -22,6 +22,7 @@ import (
 	"cortex/internal/config"
 	"cortex/internal/jobs"
 	"cortex/internal/llm"
+	"cortex/internal/rag"
 	"cortex/internal/tools"
 	"cortex/internal/tools/gmail"
 	"cortex/internal/tools/jira"
@@ -120,14 +121,52 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	// Eight tools, three sources. The registry is assembled in one place so a
-	// missing source is a startup failure rather than a silently smaller tool
-	// set: an agent that never learns email exists will still answer a question
-	// whose answer is only in email, and it will answer it wrongly.
+	// The indexing sources are the same three clients the tools use, wrapped so
+	// the RAG layer can crawl them. Sharing the client means the index is built
+	// from exactly the text the agent reads live — and, for Gmail, that the crawl
+	// honours GMAIL_QUERY_SCOPE, so a scoped deployment cannot quietly embed
+	// personal mail.
+	indexer, err := rag.New(rag.Config{
+		DB:       pool,
+		Embedder: provider,
+		Sources: []tools.DocumentSource{
+			jira.NewSource(jiraClient, cfg.IndexMaxDocuments, cfg.JiraProjects, logger),
+			notion.NewSource(notionClient, cfg.IndexMaxDocuments, logger),
+			gmail.NewSource(gmailClient, cfg.IndexMaxDocuments, logger),
+		},
+		MaxDocuments: cfg.IndexMaxDocuments,
+		// Passed explicitly rather than left to the zero value. rag.Config
+		// treats a zero OverlapTokens as "no overlap" — a legitimate thing for a
+		// caller to ask for — so omitting it here silently indexed production
+		// with none, against REQ-4.5's 500/50.
+		ChunkTokens:   rag.DefaultChunkTokens,
+		OverlapTokens: rag.DefaultOverlapTokens,
+		Logger:        logger,
+	})
+	if err != nil {
+		return err
+	}
+
+	knowledgeBase, err := rag.NewSearchTool(rag.SearchConfig{
+		DB:       pool,
+		Embedder: provider,
+		Sources:  indexer.Sources(),
+		Logger:   logger,
+	})
+	if err != nil {
+		return err
+	}
+
+	// Nine tools: eight live ones across three sources, plus the knowledge base
+	// over all three. The registry is assembled in one place so a missing source
+	// is a startup failure rather than a silently smaller tool set: an agent that
+	// never learns email exists will still answer a question whose answer is only
+	// in email, and it will answer it wrongly.
 	registry, err := tools.NewRegistry(slices.Concat(
 		jira.NewTools(jiraClient),
 		notion.NewTools(notionClient),
 		gmail.NewTools(gmailClient),
+		[]tools.Tool{knowledgeBase},
 	)...)
 	if err != nil {
 		return err
@@ -152,14 +191,21 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
+	indexWorker, err := jobs.NewIndexSourceWorker(indexer, logger)
+	if err != nil {
+		return err
+	}
+
 	// One process runs both the API and the workers (idea.md §1.1: one binary,
 	// one database). River polls Postgres for jobs, so there is nothing to
 	// coordinate between them beyond sharing the pool.
 	queue, err := jobs.New(jobs.Config{
-		Pool:       pool,
-		Worker:     worker,
-		MaxWorkers: cfg.AgentRunWorkers,
-		Logger:     logger,
+		Pool:         pool,
+		Worker:       worker,
+		IndexWorker:  indexWorker,
+		MaxWorkers:   cfg.AgentRunWorkers,
+		IndexWorkers: cfg.IndexWorkers,
+		Logger:       logger,
 	})
 	if err != nil {
 		return err
@@ -174,13 +220,28 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	logger.Info("queue workers started",
-		"queue", jobs.AgentRunQueue, "workers", cfg.AgentRunWorkers, "tools", registry.Len())
+		"agent_queue", jobs.AgentRunQueue, "agent_workers", cfg.AgentRunWorkers,
+		"index_queue", jobs.IndexSourceQueue, "index_workers", cfg.IndexWorkers,
+		"tools", registry.Len())
+
+	// There is no authentication yet, and Day 4 widened what an unauthenticated
+	// reader gets: GET /api/runs/{id}/trace returns full tool observations
+	// (verbatim email and ticket bodies), and POST /api/admin/index queues paid
+	// crawls. The loopback default is what closes all of that, so leaving it is a
+	// deliberate exposure and should not be silent. hostCheck still rejects a
+	// forged Host, but it cannot tell a LAN peer from localhost.
+	if !isLoopback(cfg.Host) {
+		logger.Warn("server is bound beyond loopback and the API has no authentication",
+			"host", cfg.Host,
+			"exposed", "GET /api/runs/{id}/trace, POST /api/chat, POST /api/admin/index")
+	}
 
 	handler := api.NewRouter(api.Deps{
 		DB:           pool,
 		Enqueuer:     queue,
 		Model:        cfg.LLMModel,
 		DevUserEmail: devUserEmail,
+		IndexSources: indexer.Sources(),
 		Logger:       logger,
 	})
 
@@ -231,6 +292,20 @@ func run(logger *slog.Logger) error {
 	}
 
 	return <-serveErr
+}
+
+// isLoopback reports whether the configured bind address reaches only this
+// machine. An unparseable or empty host is treated as exposed: warning about a
+// safe binding is cheap, staying quiet about an unsafe one is not.
+func isLoopback(host string) bool {
+	switch host {
+	case "localhost":
+		return true
+	case "":
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // buildGmailClient wires the cached refresh token into a Gmail client.

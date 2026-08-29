@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
+	"github.com/riverqueue/river/rivertype"
 )
 
 // Queue is the enqueue side of the job system.
@@ -30,7 +31,7 @@ type Queue struct {
 	processing bool
 }
 
-// jobTimeout bounds one agent run.
+// jobTimeout bounds one agent run and one indexing crawl.
 //
 // River's own default is one minute, and it cancels the job's context when it
 // elapses — which killed exactly the runs worth having. A multi-hop
@@ -44,6 +45,11 @@ type Queue struct {
 // from occupying a worker forever. It must stay below River's
 // RescueStuckJobsAfter (1h by default), or a slow run would be rescued and
 // retried while it is still working.
+//
+// The same ceiling covers an indexing crawl, which is bounded by
+// INDEX_MAX_DOCUMENTS rather than by the clock. A crawl that does hit this is
+// retried, and the content-hash check makes the retry resume rather than
+// restart: everything already written is skipped without being re-embedded.
 const jobTimeout = 15 * time.Minute
 
 // Config configures the job queue.
@@ -54,8 +60,15 @@ type Config struct {
 	// enqueue-only client — which is what a CLI that wants to submit work
 	// without processing it needs.
 	Worker *AgentRunWorker
+	// IndexWorker executes source reindexing. Nil leaves the indexing queue
+	// unserved, which is what an enqueue-only client wants.
+	IndexWorker *IndexSourceWorker
 	// MaxWorkers is the concurrency on the agent_runs queue.
 	MaxWorkers int
+	// IndexWorkers is the concurrency on the index_source queue. One is
+	// usually right: the crawls are rate-limited by the upstream APIs, not by
+	// local CPU, and running three at once mostly buys three sets of 429s.
+	IndexWorkers int
 	// Logger receives River's own logs.
 	Logger *slog.Logger
 }
@@ -76,20 +89,26 @@ func New(cfg Config) (*Queue, error) {
 
 	riverConfig := &river.Config{Logger: logger, JobTimeout: jobTimeout}
 
-	processing := cfg.Worker != nil
-	if cfg.Worker != nil {
-		maxWorkers := cfg.MaxWorkers
-		if maxWorkers <= 0 {
-			maxWorkers = 1
-		}
+	processing := cfg.Worker != nil || cfg.IndexWorker != nil
+	if processing {
 		workers := river.NewWorkers()
-		if err := river.AddWorkerSafely(workers, cfg.Worker); err != nil {
-			return nil, fmt.Errorf("jobs: register agent run worker: %w", err)
+		queues := map[string]river.QueueConfig{}
+
+		if cfg.Worker != nil {
+			if err := river.AddWorkerSafely(workers, cfg.Worker); err != nil {
+				return nil, fmt.Errorf("jobs: register agent run worker: %w", err)
+			}
+			queues[AgentRunQueue] = river.QueueConfig{MaxWorkers: positive(cfg.MaxWorkers, 1)}
 		}
+		if cfg.IndexWorker != nil {
+			if err := river.AddWorkerSafely(workers, cfg.IndexWorker); err != nil {
+				return nil, fmt.Errorf("jobs: register index source worker: %w", err)
+			}
+			queues[IndexSourceQueue] = river.QueueConfig{MaxWorkers: positive(cfg.IndexWorkers, 1)}
+		}
+
 		riverConfig.Workers = workers
-		riverConfig.Queues = map[string]river.QueueConfig{
-			AgentRunQueue: {MaxWorkers: maxWorkers},
-		}
+		riverConfig.Queues = queues
 	}
 
 	client, err := river.NewClient(riverpgxv5.New(cfg.Pool), riverConfig)
@@ -113,6 +132,52 @@ func (q *Queue) EnqueueAgentRun(ctx context.Context, tx pgx.Tx, runID uuid.UUID)
 		return fmt.Errorf("enqueue agent run %s: %w", runID, err)
 	}
 	return nil
+}
+
+// EnqueueIndexSource queues a reindex of one source.
+//
+// Not transactional, unlike EnqueueAgentRun: there is no row it has to commit
+// with. The admin endpoint that calls it has nothing to roll back, and an
+// indexing job is idempotent — running it twice re-reads the sources and writes
+// nothing the first run already wrote.
+func (q *Queue) EnqueueIndexSource(ctx context.Context, source string) error {
+	if _, err := q.client.Insert(ctx, IndexSourceArgs{Source: source}, &river.InsertOpts{
+		Queue: IndexSourceQueue,
+		// One in-flight job per source. Someone hitting the admin endpoint three
+		// times should get one crawl, not three concurrent ones racing to write
+		// the same document rows.
+		//
+		// The state list must contain all four of River's required states —
+		// available, pending, running, scheduled (insert_opts.go:
+		// requiredV3states) — or River rejects the insert outright rather than
+		// falling back to a default. Omitting `pending` made every enqueue here
+		// fail, so POST /api/admin/index always answered 500 and nothing was
+		// ever indexed; TestEnqueueIndexSourceInsertsAJob exists so that cannot
+		// go unnoticed again. `retryable` is added on top of the required four:
+		// a crawl that failed and is waiting to retry is still in flight, and
+		// queueing a second one beside it is the duplicate work this prevents.
+		UniqueOpts: river.UniqueOpts{
+			ByArgs: true,
+			ByState: []rivertype.JobState{
+				rivertype.JobStateAvailable,
+				rivertype.JobStatePending,
+				rivertype.JobStateRunning,
+				rivertype.JobStateScheduled,
+				rivertype.JobStateRetryable,
+			},
+		},
+	}); err != nil {
+		return fmt.Errorf("enqueue index of %s: %w", source, err)
+	}
+	return nil
+}
+
+// positive returns value when it is positive, and fallback otherwise.
+func positive(value, fallback int) int {
+	if value > 0 {
+		return value
+	}
+	return fallback
 }
 
 // Start begins processing jobs. It is a no-op on an insert-only queue.

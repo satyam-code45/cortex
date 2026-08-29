@@ -12,7 +12,13 @@ import (
 
 type Querier interface {
 	CompleteAgentRun(ctx context.Context, arg CompleteAgentRunParams) (AgentRun, error)
+	// Used to tell "the index is empty" apart from "this query matched nothing",
+	// which are different answers for the agent: the first means stop searching the
+	// knowledge base, the second means rephrase.
+	CountDocuments(ctx context.Context) (int64, error)
+	CountDocumentsBySource(ctx context.Context, source string) (int64, error)
 	CreateConversation(ctx context.Context, arg CreateConversationParams) (Conversation, error)
+	DeleteChunksByDocument(ctx context.Context, documentID uuid.UUID) error
 	FailAgentRun(ctx context.Context, arg FailAgentRunParams) (AgentRun, error)
 	// Ownership is enforced in the query, not in Go: GET /api/runs/{id} takes a
 	// caller-supplied UUID, and joining through conversations is what stops it
@@ -21,7 +27,22 @@ type Querier interface {
 	// Scoped by user_id on purpose: keeping the ownership predicate in the query
 	// means a future handler cannot forget the Go-side check and open an IDOR.
 	GetConversation(ctx context.Context, arg GetConversationParams) (Conversation, error)
+	GetDocumentBySourceExternalID(ctx context.Context, arg GetDocumentBySourceExternalIDParams) (Document, error)
 	InsertAgentRun(ctx context.Context, arg InsertAgentRunParams) (AgentRun, error)
+	InsertCitation(ctx context.Context, arg InsertCitationParams) (Citation, error)
+	// The embedding arrives as pgvector's text form and is cast in SQL. Passing it
+	// as text keeps pgx out of the business of knowing the vector type's OID (which
+	// is dynamic, since vector comes from an extension) at the cost of one cast per
+	// row on a path that is already dominated by the embedding API call.
+	InsertDocumentChunk(ctx context.Context, arg InsertDocumentChunkParams) error
+	// Per-run evidence numbering plus per-run dedupe in one statement.
+	//
+	// The conflict clause is a deliberate no-op update rather than DO NOTHING: the
+	// caller needs the existing row's seq back so a second tool call that surfaces
+	// the same document reuses its citation number, and DO NOTHING returns no row at
+	// all. Assigning tool_call_id to itself keeps "the call that first surfaced this"
+	// intact.
+	InsertEvidence(ctx context.Context, arg InsertEvidenceParams) (Evidence, error)
 	InsertLLMCall(ctx context.Context, arg InsertLLMCallParams) (LlmCall, error)
 	InsertMessage(ctx context.Context, arg InsertMessageParams) (Message, error)
 	// The sequence is computed inside the statement rather than tracked by the
@@ -29,17 +50,45 @@ type Querier interface {
 	// transcript already got, and guessing would collide with the
 	// unique (agent_run_id, seq) constraint and abort the whole transaction.
 	InsertRunEvent(ctx context.Context, arg InsertRunEventParams) (RunEvent, error)
+	// seq is computed inside the statement, exactly as InsertRunEvent does: a run
+	// retried after a worker crash has no in-process memory of how many tool calls
+	// it already recorded, and guessing would collide with the unique
+	// (agent_run_id, seq) constraint.
+	InsertToolCall(ctx context.Context, arg InsertToolCallParams) (ToolCall, error)
+	// Joined with evidence because a citation is only meaningful alongside what it
+	// points at: the trace endpoint renders the marker, the claim, and the source's
+	// title and URL together.
+	// Ordered by the marker's number, not by evidence.seq: the markers are what a
+	// reader follows through the answer ([1], [2], [3]), while evidence.seq is
+	// discovery order and does not match. A plain text sort would put [10] before
+	// [2], hence the cast.
+	ListCitationsByRun(ctx context.Context, agentRunID uuid.UUID) ([]ListCitationsByRunRow, error)
 	ListConversationsByUser(ctx context.Context, userID uuid.UUID) ([]Conversation, error)
+	ListEvidenceByRun(ctx context.Context, agentRunID uuid.UUID) ([]Evidence, error)
 	ListMessagesByConversation(ctx context.Context, conversationID uuid.UUID) ([]Message, error)
 	// Ordered by seq, not created_at: two events written inside one transaction can
 	// share a timestamp, and the transcript's order is the thing being replayed.
 	ListRunEventsByRun(ctx context.Context, agentRunID uuid.UUID) ([]RunEvent, error)
+	ListToolCallsByRun(ctx context.Context, agentRunID uuid.UUID) ([]ToolCall, error)
+	// The join is the point (idea.md §11): the vector index finds the chunk, and the
+	// relational half supplies the title, URL and metadata that make it citable.
+	// Doing both in one query is only possible because the vectors live in the same
+	// Postgres as everything else.
+	//
+	// <=> is cosine DISTANCE (0 = identical), so similarity is 1 - distance and the
+	// ordering is ascending. The operator must match the index's vector_cosine_ops
+	// or the planner silently ignores the index.
+	SearchDocumentChunks(ctx context.Context, arg SearchDocumentChunksParams) ([]SearchDocumentChunksRow, error)
 	// Claims a queued run. The status guard makes the transition idempotent for a
 	// River job that is retried after a worker crash (still 'running'), while
 	// refusing to restart a run that already reached a terminal state — returning
 	// no rows is the signal to skip.
 	StartAgentRun(ctx context.Context, id uuid.UUID) (AgentRun, error)
 	TouchConversation(ctx context.Context, id uuid.UUID) error
+	// Called only for documents whose content_hash actually changed (the indexer
+	// short-circuits before this on an unchanged hash), so the update branch always
+	// has work to do.
+	UpsertDocument(ctx context.Context, arg UpsertDocumentParams) (Document, error)
 	// Idempotent by email: returns the existing row when the user already exists.
 	UpsertUser(ctx context.Context, email string) (User, error)
 }

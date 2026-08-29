@@ -7,6 +7,7 @@ package store
 import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/pgvector/pgvector-go"
 )
 
 type AgentRun struct {
@@ -24,12 +25,58 @@ type AgentRun struct {
 	FinishedAt     pgtype.Timestamptz `json:"finished_at"`
 }
 
+type Citation struct {
+	ID         uuid.UUID          `json:"id"`
+	AgentRunID uuid.UUID          `json:"agent_run_id"`
+	EvidenceID uuid.UUID          `json:"evidence_id"`
+	Marker     string             `json:"marker"`
+	ClaimText  *string            `json:"claim_text"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
 type Conversation struct {
 	ID        uuid.UUID          `json:"id"`
 	UserID    uuid.UUID          `json:"user_id"`
 	Title     *string            `json:"title"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Document struct {
+	ID              uuid.UUID          `json:"id"`
+	Source          string             `json:"source"`
+	ExternalID      string             `json:"external_id"`
+	Title           string             `json:"title"`
+	Url             string             `json:"url"`
+	Content         string             `json:"content"`
+	Metadata        []byte             `json:"metadata"`
+	ContentHash     string             `json:"content_hash"`
+	SourceTimestamp pgtype.Timestamptz `json:"source_timestamp"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type DocumentChunk struct {
+	ID         uuid.UUID          `json:"id"`
+	DocumentID uuid.UUID          `json:"document_id"`
+	ChunkIndex int32              `json:"chunk_index"`
+	Content    string             `json:"content"`
+	Embedding  *pgvector.Vector   `json:"embedding"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type Evidence struct {
+	ID              uuid.UUID          `json:"id"`
+	AgentRunID      uuid.UUID          `json:"agent_run_id"`
+	ToolCallID      *uuid.UUID         `json:"tool_call_id"`
+	Seq             int32              `json:"seq"`
+	Source          string             `json:"source"`
+	ExternalID      string             `json:"external_id"`
+	Title           *string            `json:"title"`
+	Url             *string            `json:"url"`
+	Snippet         *string            `json:"snippet"`
+	SourceTimestamp pgtype.Timestamptz `json:"source_timestamp"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
 type LlmCall struct {
@@ -58,6 +105,20 @@ type RunEvent struct {
 	Type       string             `json:"type"`
 	Payload    []byte             `json:"payload"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type ToolCall struct {
+	ID            uuid.UUID          `json:"id"`
+	AgentRunID    uuid.UUID          `json:"agent_run_id"`
+	Seq           int32              `json:"seq"`
+	ToolName      string             `json:"tool_name"`
+	Arguments     []byte             `json:"arguments"`
+	ResultSummary *string            `json:"result_summary"`
+	EvidenceCount int32              `json:"evidence_count"`
+	LatencyMs     *int32             `json:"latency_ms"`
+	Status        string             `json:"status"`
+	Error         *string            `json:"error"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 type User struct {

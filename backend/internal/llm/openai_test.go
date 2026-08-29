@@ -84,7 +84,10 @@ type recorder struct {
 	path    string
 	auth    string
 	request capturedRequest
-	calls   int
+	// raw is the untouched request body, for assertions on fields
+	// capturedRequest does not model (e.g. response_format).
+	raw   []byte
+	calls int
 }
 
 // newFakeProvider stands an httptest server in for api.openai.com and returns a
@@ -100,6 +103,7 @@ func newFakeProvider(t *testing.T, status int, body string) (*llm.OpenAI, *recor
 		if err != nil {
 			t.Errorf("read request body: %v", err)
 		}
+		rec.raw = raw
 		if err := json.Unmarshal(raw, &rec.request); err != nil {
 			t.Errorf("decode request body %q: %v", raw, err)
 		}

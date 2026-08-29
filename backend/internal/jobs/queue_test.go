@@ -2,6 +2,7 @@ package jobs_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -286,5 +287,84 @@ func TestInsertOnlyQueueStartStop(t *testing.T) {
 func TestNewRequiresPool(t *testing.T) {
 	if _, err := jobs.New(jobs.Config{Logger: discardLogger()}); err == nil {
 		t.Error("jobs.New accepted a nil pool, want an error")
+	}
+}
+
+// EnqueueIndexSource must actually reach River.
+//
+// This exists because it did not. The first version passed a custom
+// UniqueOpts.ByState that omitted 'pending', and River rejects a partial state
+// list outright (insert_opts.go: requiredV3states) — so every call returned an
+// error, POST /api/admin/index always answered 500, and nothing was ever
+// indexed. Nothing caught it: the admin handler's tests drive a stub enqueuer,
+// and this file had no coverage of the indexing path at all.
+//
+// The lesson generalizes past this one bug, which is why the test asserts the
+// insert rather than the options: UniqueOpts is validated by River at insert
+// time, not by the compiler, so the only way to know the configuration is legal
+// is to insert with it.
+func TestEnqueueIndexSourceInsertsAJob(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+
+	queue, err := jobs.New(jobs.Config{Pool: pool, Logger: discardLogger()})
+	if err != nil {
+		t.Fatalf("build queue: %v", err)
+	}
+
+	if err := queue.EnqueueIndexSource(ctx, "notion"); err != nil {
+		t.Fatalf("EnqueueIndexSource: %v", err)
+	}
+
+	var kind, queueName, state string
+	var args []byte
+	if err := pool.QueryRow(ctx,
+		`SELECT kind, queue, state, args FROM river_job ORDER BY id DESC LIMIT 1`).
+		Scan(&kind, &queueName, &state, &args); err != nil {
+		t.Fatalf("read river_job: %v", err)
+	}
+	if kind != "index_source" {
+		t.Errorf("kind = %q, want index_source", kind)
+	}
+	if queueName != jobs.IndexSourceQueue {
+		t.Errorf("queue = %q, want %q", queueName, jobs.IndexSourceQueue)
+	}
+	// Decoded rather than string-matched: jsonb is stored normalized, so
+	// Postgres renders it as `{"source": "notion"}` with a space and a raw
+	// substring check fails on formatting rather than on content.
+	var decoded jobs.IndexSourceArgs
+	if err := json.Unmarshal(args, &decoded); err != nil {
+		t.Fatalf("decode river_job.args: %v", err)
+	}
+	if decoded.Source != "notion" {
+		t.Errorf("args.source = %q, want notion", decoded.Source)
+	}
+
+	// The uniqueness guard: a second request for the same source while the first
+	// is still pending must collapse into it rather than queue a second crawl.
+	if err := queue.EnqueueIndexSource(ctx, "notion"); err != nil {
+		t.Fatalf("second EnqueueIndexSource: %v", err)
+	}
+	var notionJobs int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM river_job WHERE kind = 'index_source' AND args->>'source' = 'notion'`).
+		Scan(&notionJobs); err != nil {
+		t.Fatalf("count river_job: %v", err)
+	}
+	if notionJobs != 1 {
+		t.Errorf("notion index jobs = %d, want 1 (the duplicate must collapse)", notionJobs)
+	}
+
+	// A different source is different work and must queue separately.
+	if err := queue.EnqueueIndexSource(ctx, "jira"); err != nil {
+		t.Fatalf("EnqueueIndexSource(jira): %v", err)
+	}
+	var total int
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM river_job WHERE kind = 'index_source'`).Scan(&total); err != nil {
+		t.Fatalf("count river_job: %v", err)
+	}
+	if total != 2 {
+		t.Errorf("index jobs = %d, want 2 (one per source)", total)
 	}
 }

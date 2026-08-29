@@ -69,8 +69,12 @@ func TestReconstructTranscriptMatchesTheLoop(t *testing.T) {
 	if err := o.Run(context.Background(), seeded.runID); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if provider.callCount() != 4 {
-		t.Fatalf("provider calls = %d, want 4", provider.callCount())
+	// Three loop turns plus the citation pass. The citation pass is the last
+	// generation, so the transcript compared below is the one it saw — which is
+	// the strictest version of this test: its injected turns have to be
+	// reconstructable too.
+	if provider.callCount() != 5 {
+		t.Fatalf("provider calls = %d, want 5", provider.callCount())
 	}
 
 	// The transcript the loop actually used is the request behind its last
@@ -92,11 +96,12 @@ func TestReconstructTranscriptMatchesTheLoop(t *testing.T) {
 	// Sanity: the transcript is the real thing, not two empty slices matching.
 	// 2 history turns + the question + (assistant, observation) + (assistant,
 	// observation, observation) = 8, plus the draft answer and the completeness
-	// check injected before that answer is accepted = 10. Both of those last two
-	// are turns the model saw, so a replay that omits them resumes from a
-	// conversation that never happened.
-	if len(messages) != 10 {
-		t.Errorf("reconstructed %d messages, want 10: %s", len(messages), describeTranscript(messages))
+	// check injected before that answer is accepted = 10, plus the accepted
+	// answer and the citation instruction injected by the Day 4 citation pass =
+	// 12. All four of those injected turns are turns the model saw, so a replay
+	// that omits them resumes from a conversation that never happened.
+	if len(messages) != 12 {
+		t.Errorf("reconstructed %d messages, want 12: %s", len(messages), describeTranscript(messages))
 	}
 }
 

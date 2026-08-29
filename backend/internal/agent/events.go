@@ -40,6 +40,9 @@ const (
 	EventToolCallStarted = "tool_call_started"
 	// EventToolCallFinished records the observation handed back to the model.
 	EventToolCallFinished = "tool_call_finished"
+	// EventCitations records the outcome of the citation pass: which markers
+	// survived, what they point at, and how many the validator dropped.
+	EventCitations = "citations"
 	// EventAnswer records the final answer text.
 	EventAnswer = "answer"
 	// EventRunFinished closes a successful run.
@@ -61,6 +64,10 @@ const (
 	// PurposeCompletenessCheck is the one call per run that re-reads the model's
 	// own draft answer against the question before it is accepted.
 	PurposeCompletenessCheck = "completeness_check"
+
+	// PurposeAnswerCitations is the structured call that attaches evidence
+	// markers to the accepted answer.
+	PurposeAnswerCitations = "answer_citations"
 )
 
 // runStartedPayload is the payload of EventRunStarted.
@@ -129,6 +136,26 @@ type toolCallFinishedPayload struct {
 	Error         string          `json:"error,omitempty"`
 	CacheHit      bool            `json:"cache_hit"`
 	LatencyMS     int64           `json:"latency_ms"`
+}
+
+// citationsPayload is the payload of EventCitations.
+//
+// Skipped is recorded rather than inferred from an empty Citations list: "the
+// run gathered no evidence" and "the citation call timed out" look identical
+// from the outside, and only one of them is a problem.
+type citationsPayload struct {
+	Citations []eventCitation `json:"citations"`
+	Dropped   int             `json:"dropped"`
+	Evidence  int             `json:"evidence_count"`
+	Skipped   string          `json:"skipped,omitempty"`
+}
+
+// eventCitation is one persisted citation as stored in an event payload.
+type eventCitation struct {
+	Marker      string    `json:"marker"`
+	EvidenceID  uuid.UUID `json:"evidence_id"`
+	EvidenceSeq int       `json:"evidence_seq"`
+	Claim       string    `json:"claim"`
 }
 
 // answerPayload is the payload of EventAnswer.
@@ -318,8 +345,8 @@ func ReconstructTranscript(events []store.RunEvent) (system string, messages []l
 
 		default:
 			// run_started/llm_call/tool_call_finished are the only events that
-			// contribute turns. tool_call_started, answer, run_finished and
-			// run_failed are observability, not conversation.
+			// contribute turns. tool_call_started, citations, answer,
+			// run_finished and run_failed are observability, not conversation.
 		}
 	}
 	return system, messages, nil

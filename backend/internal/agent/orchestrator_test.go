@@ -159,9 +159,10 @@ func TestRunHappyPath(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// One reasoning turn, one answer, one completeness check on that answer.
-	if provider.callCount() != 3 {
-		t.Errorf("provider calls = %d, want 3", provider.callCount())
+	// One reasoning turn, one answer, one completeness check on that answer, and
+	// the Day 4 citation pass over the accepted answer.
+	if provider.callCount() != 4 {
+		t.Errorf("provider calls = %d, want 4", provider.callCount())
 	}
 	if tool.executions() != 1 {
 		t.Errorf("tool executions = %d, want 1", tool.executions())
@@ -210,6 +211,9 @@ func TestRunHappyPath(t *testing.T) {
 		agent.EventLLMCall,
 		// The completeness check: a generation that reviews the draft answer.
 		agent.EventLLMCall,
+		// The citation pass, and the record of what it produced.
+		agent.EventLLMCall,
+		agent.EventCitations,
 		agent.EventAnswer,
 		agent.EventRunFinished,
 	}
@@ -268,13 +272,12 @@ func TestRunHappyPath(t *testing.T) {
 
 	// Every generation is accounted for on llm_calls with its purpose.
 	calls := loadLLMCalls(t, pool, seeded.runID)
-	if len(calls) != 3 {
-		t.Fatalf("llm_calls = %d, want 3", len(calls))
+	wantPurposes := []string{agent.PurposeAgentLoop, agent.PurposeAgentLoop,
+		agent.PurposeCompletenessCheck, agent.PurposeAnswerCitations}
+	if got := purposesOf(calls); !equalStrings(got, wantPurposes) {
+		t.Fatalf("llm_calls purposes = %v, want %v", got, wantPurposes)
 	}
-	if last := calls[len(calls)-1]; last.purpose != agent.PurposeCompletenessCheck {
-		t.Errorf("final llm_call purpose = %q, want %q", last.purpose, agent.PurposeCompletenessCheck)
-	}
-	for i, c := range calls[:len(calls)-1] {
+	for i, c := range calls[:2] {
 		if c.purpose != agent.PurposeAgentLoop {
 			t.Errorf("llm_calls[%d].purpose = %q, want %q", i, c.purpose, agent.PurposeAgentLoop)
 		}
@@ -362,8 +365,9 @@ func TestRunMaxIterationCap(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if provider.callCount() != 3 {
-		t.Errorf("provider calls = %d, want 3 (2 capped iterations + 1 forced answer)", provider.callCount())
+	if provider.callCount() != 4 {
+		t.Errorf("provider calls = %d, want 4 (2 capped iterations, the forced answer, the citation pass)",
+			provider.callCount())
 	}
 	if tool.executions() != 2 {
 		t.Errorf("tool executions = %d, want 2 (the cap bounds tool work too)", tool.executions())
@@ -387,7 +391,8 @@ func TestRunMaxIterationCap(t *testing.T) {
 	}
 
 	purposes := purposesOf(loadLLMCalls(t, pool, seeded.runID))
-	want := []string{agent.PurposeAgentLoop, agent.PurposeAgentLoop, agent.PurposeFinalAnswer}
+	want := []string{agent.PurposeAgentLoop, agent.PurposeAgentLoop,
+		agent.PurposeFinalAnswer, agent.PurposeAnswerCitations}
 	if !equalStrings(purposes, want) {
 		t.Errorf("llm_calls purposes = %v, want %v", purposes, want)
 	}
@@ -879,15 +884,16 @@ func TestRunSummarizesOversizedToolResult(t *testing.T) {
 	if err := o.Run(context.Background(), seeded.runID); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if provider.callCount() != 4 {
-		t.Fatalf("provider calls = %d, want 4 (loop, summarize, loop, completeness check)", provider.callCount())
+	if provider.callCount() != 5 {
+		t.Fatalf("provider calls = %d, want 5 (loop, summarize, loop, completeness check, citation pass)",
+			provider.callCount())
 	}
 
 	// TEST-2.2's purpose assertion, as persisted: llm_calls carries the
 	// summarization under its own purpose and on the utility model.
 	calls := loadLLMCalls(t, pool, seeded.runID)
 	want := []string{agent.PurposeAgentLoop, agent.PurposeToolOutputSummary,
-		agent.PurposeAgentLoop, agent.PurposeCompletenessCheck}
+		agent.PurposeAgentLoop, agent.PurposeCompletenessCheck, agent.PurposeAnswerCitations}
 	if got := purposesOf(calls); !equalStrings(got, want) {
 		t.Fatalf("llm_calls purposes = %v, want %v", got, want)
 	}
@@ -972,7 +978,8 @@ func TestRunDoesNotSummarizeResultWithinBudget(t *testing.T) {
 	}
 
 	if got := purposesOf(loadLLMCalls(t, pool, seeded.runID)); !equalStrings(got,
-		[]string{agent.PurposeAgentLoop, agent.PurposeAgentLoop, agent.PurposeCompletenessCheck}) {
+		[]string{agent.PurposeAgentLoop, agent.PurposeAgentLoop,
+			agent.PurposeCompletenessCheck, agent.PurposeAnswerCitations}) {
 		t.Errorf("llm_calls purposes = %v, want two agent_loop calls, the completeness check, and no summarization", got)
 	}
 	finished := decodePayload(t, eventsOfType(loadEvents(t, pool, seeded.runID), agent.EventToolCallFinished)[0])

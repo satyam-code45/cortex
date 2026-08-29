@@ -32,9 +32,10 @@ const devUserEmail = "dev@cortex.local"
 // was queued — and, when err is set, that a failed enqueue takes the whole
 // transaction down with it.
 type stubEnqueuer struct {
-	mu     sync.Mutex
-	err    error
-	runIDs []uuid.UUID
+	mu      sync.Mutex
+	err     error
+	runIDs  []uuid.UUID
+	indexed []string
 }
 
 var _ api.Enqueuer = (*stubEnqueuer)(nil)
@@ -43,6 +44,15 @@ func (s *stubEnqueuer) EnqueueAgentRun(_ context.Context, _ pgx.Tx, runID uuid.U
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.runIDs = append(s.runIDs, runID)
+	return s.err
+}
+
+// EnqueueIndexSource records a queued reindex. It shares err with
+// EnqueueAgentRun: both failure paths are "the queue is down".
+func (s *stubEnqueuer) EnqueueIndexSource(_ context.Context, source string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.indexed = append(s.indexed, source)
 	return s.err
 }
 

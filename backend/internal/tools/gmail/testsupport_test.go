@@ -69,6 +69,13 @@ func fixtureRoute(names ...string) *route {
 }
 
 // bodyRoute serves a single literal body with the given status.
+// sequenceRoute serves an explicit response sequence, for a path whose successive
+// responses differ — a paginated list, or a failure followed by a retry. Mirrors
+// the helper of the same name in the Jira test harness.
+func sequenceRoute(responses ...response) *route {
+	return &route{responses: responses}
+}
+
 func bodyRoute(status int, body string) *route {
 	return &route{responses: []response{{status: status, body: body}}}
 }

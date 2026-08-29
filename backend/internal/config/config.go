@@ -32,6 +32,15 @@ const (
 	// server process.
 	DefaultAgentRunWorkers = 4
 
+	// DefaultIndexMaxDocuments caps how many documents one indexing crawl reads
+	// from a single source. It exists because a crawl is otherwise unbounded in
+	// both time and OpenAI spend: an unfamiliar mailbox has no natural size.
+	DefaultIndexMaxDocuments = 400
+	// DefaultIndexWorkers is the concurrency on the indexing queue. One: the
+	// crawls are bounded by upstream rate limits, not by local CPU, so running
+	// several at once mostly buys several sets of 429s.
+	DefaultIndexWorkers = 1
+
 	// DefaultGmailCredentialsPath is where the OAuth Desktop client JSON is
 	// expected, relative to the repository root.
 	DefaultGmailCredentialsPath = "./gmail-credentials.json"
@@ -67,12 +76,24 @@ type Config struct {
 	// AgentRunWorkers is the River worker count on the agent_runs queue.
 	AgentRunWorkers int
 
+	// IndexMaxDocuments caps documents read per source per indexing run.
+	IndexMaxDocuments int
+	// IndexWorkers is the River worker count on the index_source queue.
+	IndexWorkers int
+
 	// JiraBaseURL is the Atlassian site root, e.g. https://site.atlassian.net.
 	JiraBaseURL string
 	// JiraEmail is the Atlassian account email used for API token auth.
 	JiraEmail string
 	// JiraAPIToken authenticates against the Jira REST API.
 	JiraAPIToken string
+	// JiraProjects, when set, restricts the indexing crawl to these project keys.
+	//
+	// Empty - the default - means every project the account can see, which is
+	// Cortex working as intended: it reads live sources. Setting it is how an
+	// unrelated project (a site's pre-existing sample project, say) is kept out
+	// of the vector store. The same role GmailQueryScope plays for mail.
+	JiraProjects []string
 
 	// NotionToken is the internal integration secret.
 	NotionToken string
@@ -106,12 +127,15 @@ type Config struct {
 func (c Config) String() string {
 	return fmt.Sprintf("Config{DatabaseURL:%s Host:%s Port:%s "+
 		"OpenAIAPIKey:%s OpenAIBaseURL:%s LLMModel:%s LLMUtilityModel:%s EmbeddingModel:%s "+
-		"MaxIterations:%d AgentRunWorkers:%d JiraBaseURL:%s JiraEmail:%s JiraAPIToken:%s "+
-		"NotionToken:%s NotionParentPageID:%s GmailCredentialsPath:%s GmailTokenPath:%s GmailQueryScope:%s}",
+		"MaxIterations:%d AgentRunWorkers:%d IndexMaxDocuments:%d IndexWorkers:%d "+
+		"JiraBaseURL:%s JiraEmail:%s JiraAPIToken:%s "+
+		"JiraProjects:%s NotionToken:%s NotionParentPageID:%s "+
+		"GmailCredentialsPath:%s GmailTokenPath:%s GmailQueryScope:%s}",
 		redactDSN(c.DatabaseURL), c.Host, c.Port,
 		redact(c.OpenAIAPIKey), c.OpenAIBaseURL, c.LLMModel, c.LLMUtilityModel, c.EmbeddingModel,
-		c.MaxIterations, c.AgentRunWorkers, c.JiraBaseURL, c.JiraEmail, redact(c.JiraAPIToken),
-		redact(c.NotionToken), c.NotionParentPageID,
+		c.MaxIterations, c.AgentRunWorkers, c.IndexMaxDocuments, c.IndexWorkers,
+		c.JiraBaseURL, c.JiraEmail, redact(c.JiraAPIToken),
+		strings.Join(c.JiraProjects, ","), redact(c.NotionToken), c.NotionParentPageID,
 		c.GmailCredentialsPath, c.GmailTokenPath, c.GmailQueryScope)
 }
 
@@ -160,9 +184,13 @@ func Load() (*Config, error) {
 		MaxIterations:   envInt("MAX_ITERATIONS", DefaultMaxIterations),
 		AgentRunWorkers: envInt("AGENT_RUN_WORKERS", DefaultAgentRunWorkers),
 
+		IndexMaxDocuments: envInt("INDEX_MAX_DOCUMENTS", DefaultIndexMaxDocuments),
+		IndexWorkers:      envInt("INDEX_WORKERS", DefaultIndexWorkers),
+
 		JiraBaseURL:  strings.TrimRight(os.Getenv("JIRA_BASE_URL"), "/"),
 		JiraEmail:    os.Getenv("JIRA_EMAIL"),
 		JiraAPIToken: os.Getenv("JIRA_API_TOKEN"),
+		JiraProjects: envList("JIRA_PROJECTS"),
 
 		NotionToken:        os.Getenv("NOTION_TOKEN"),
 		NotionParentPageID: strings.TrimSpace(os.Getenv("NOTION_PARENT_PAGE_ID")),
@@ -240,6 +268,25 @@ func RepoPath(path string) string {
 		}
 		dir = parent
 	}
+}
+
+// envList reads a comma-separated setting into a slice, dropping empty entries.
+//
+// An unset or all-empty variable yields nil rather than a one-element slice
+// containing "", which callers would otherwise have to special-case — and which
+// would read as "restrict to the project named empty string".
+func envList(key string) []string {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 // envOr returns the value of key, or def when the variable is unset or empty.
