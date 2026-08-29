@@ -33,6 +33,13 @@ const (
 	// server process.
 	DefaultAgentRunWorkers = 4
 
+	// DefaultContextTokenBudget caps the estimated size of an agent run's
+	// transcript. 80k is roughly two-thirds of a 128k context window, leaving
+	// room for the response, the tool definitions, and estimator error. When
+	// a transcript approaches it, the oldest tool observations are replaced
+	// by utility-model summaries.
+	DefaultContextTokenBudget = 80000
+
 	// DefaultIndexMaxDocuments caps how many documents one indexing crawl reads
 	// from a single source. It exists because a crawl is otherwise unbounded in
 	// both time and OpenAI spend: an unfamiliar mailbox has no natural size.
@@ -80,6 +87,9 @@ type Config struct {
 	MaxIterations int
 	// AgentRunWorkers is the River worker count on the agent_runs queue.
 	AgentRunWorkers int
+	// ContextTokenBudget caps the estimated transcript size of one agent run
+	// before the oldest observations are compacted into summaries.
+	ContextTokenBudget int
 
 	// IndexMaxDocuments caps documents read per source per indexing run.
 	IndexMaxDocuments int
@@ -132,13 +142,13 @@ type Config struct {
 func (c Config) String() string {
 	return fmt.Sprintf("Config{DatabaseURL:%s Host:%s Port:%s FrontendOrigin:%s "+
 		"OpenAIAPIKey:%s OpenAIBaseURL:%s LLMModel:%s LLMUtilityModel:%s EmbeddingModel:%s "+
-		"MaxIterations:%d AgentRunWorkers:%d IndexMaxDocuments:%d IndexWorkers:%d "+
+		"MaxIterations:%d AgentRunWorkers:%d ContextTokenBudget:%d IndexMaxDocuments:%d IndexWorkers:%d "+
 		"JiraBaseURL:%s JiraEmail:%s JiraAPIToken:%s "+
 		"JiraProjects:%s NotionToken:%s NotionParentPageID:%s "+
 		"GmailCredentialsPath:%s GmailTokenPath:%s GmailQueryScope:%s}",
 		redactDSN(c.DatabaseURL), c.Host, c.Port, c.FrontendOrigin,
 		redact(c.OpenAIAPIKey), c.OpenAIBaseURL, c.LLMModel, c.LLMUtilityModel, c.EmbeddingModel,
-		c.MaxIterations, c.AgentRunWorkers, c.IndexMaxDocuments, c.IndexWorkers,
+		c.MaxIterations, c.AgentRunWorkers, c.ContextTokenBudget, c.IndexMaxDocuments, c.IndexWorkers,
 		c.JiraBaseURL, c.JiraEmail, redact(c.JiraAPIToken),
 		strings.Join(c.JiraProjects, ","), redact(c.NotionToken), c.NotionParentPageID,
 		c.GmailCredentialsPath, c.GmailTokenPath, c.GmailQueryScope)
@@ -187,8 +197,9 @@ func Load() (*Config, error) {
 		LLMUtilityModel: envOr("LLM_UTILITY_MODEL", DefaultLLMUtilityModel),
 		EmbeddingModel:  envOr("EMBEDDING_MODEL", DefaultEmbeddingModel),
 
-		MaxIterations:   envInt("MAX_ITERATIONS", DefaultMaxIterations),
-		AgentRunWorkers: envInt("AGENT_RUN_WORKERS", DefaultAgentRunWorkers),
+		MaxIterations:      envInt("MAX_ITERATIONS", DefaultMaxIterations),
+		AgentRunWorkers:    envInt("AGENT_RUN_WORKERS", DefaultAgentRunWorkers),
+		ContextTokenBudget: envInt("CONTEXT_TOKEN_BUDGET", DefaultContextTokenBudget),
 
 		IndexMaxDocuments: envInt("INDEX_MAX_DOCUMENTS", DefaultIndexMaxDocuments),
 		IndexWorkers:      envInt("INDEX_WORKERS", DefaultIndexWorkers),

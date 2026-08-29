@@ -1,0 +1,13 @@
+id: webhook-spec-blocked-ticket
+question: >-
+  When did the v3 webhook signing specification finally arrive, and which
+  ticket was waiting on it?
+expected_answer: >-
+  Nordwind published the v3 webhook signature-verification specification on
+  2026-08-03. The Atlas chargeback webhook receiver was the ticket waiting on
+  it.
+expected_sources:
+  - "webhook signature verification"
+  - "Chargeback webhook receiver"
+category: multi-hop
+max_tool_calls: 9

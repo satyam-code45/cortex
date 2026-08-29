@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 
@@ -42,6 +43,17 @@ const (
 
 	// DefaultToolTimeout bounds one tool execution.
 	DefaultToolTimeout = 15 * time.Second
+
+	// totalOutageThreshold is how many consecutive failed tool executions —
+	// with zero successes anywhere in the run — fail the run outright rather
+	// than letting the loop spend its remaining iterations against sources
+	// that are down. Four is deliberate: each failure has already consumed
+	// executeWithRetry's second attempt (so this represents ~8 upstream
+	// tries), and with three sources a genuine total outage shows itself
+	// within the first few calls. One success anywhere disables the guard for
+	// the rest of the run: the environment is reachable, so later failures
+	// are ordinary observations the model can work around.
+	totalOutageThreshold = 4
 
 	// DefaultMaxToolContentChars is the per-result context budget, ~4k tokens at
 	// the usual 4-chars-per-token rule of thumb. A tool result is not paid for
@@ -64,6 +76,40 @@ const (
 	// changelog entry carrying two full copies of a long description) from buying
 	// a guaranteed context-length rejection after a 90-second wait.
 	maxSummarizerInputChars = 120000
+
+	// DefaultContextTokenBudget caps the estimated transcript size before the
+	// context guard compacts old observations. Kept in step with
+	// config.DefaultContextTokenBudget, duplicated the same way
+	// DefaultMaxIterations is so this package stays self-sufficient.
+	DefaultContextTokenBudget = 80000
+
+	// estimateCharsPerToken is the usual rule of thumb for English and JSON.
+	// Chosen over the provider's reported InputTokens because that figure
+	// lags one turn — it excludes exactly the observations just appended,
+	// which are what blow the budget — and because a pure estimator makes the
+	// guard deterministic and testable without a provider.
+	estimateCharsPerToken = 4
+
+	// keepRecentToolMessages is how many of the newest tool observations are
+	// never compacted. Four: one iteration commonly issues two or three
+	// calls, so this keeps at least the entire most recent iteration verbatim
+	// — the results the model is actively reasoning about.
+	keepRecentToolMessages = 4
+
+	// compactMinChars skips observations already smaller than this: paying a
+	// utility-model call to shrink a few hundred characters saves nothing.
+	compactMinChars = 1000
+
+	// compactHeadroomDivisor sets the compaction target below the budget
+	// (budget - budget/divisor, i.e. 90%), so the very next iteration's
+	// observations do not immediately re-trigger another paid pass.
+	compactHeadroomDivisor = 10
+
+	// compactFallbackChars is how much of an observation's head survives when
+	// the summarizer itself fails during compaction. The guard has to keep
+	// working exactly when the provider is degraded, so the fallback is a
+	// deterministic hard cut rather than another provider call.
+	compactFallbackChars = 1000
 
 	// llmTimeout bounds a single generation call.
 	llmTimeout = 90 * time.Second
@@ -92,6 +138,9 @@ type Config struct {
 	MaxIterations       int
 	ToolTimeout         time.Duration
 	MaxToolContentChars int
+	// ContextTokenBudget caps the estimated transcript size; the context
+	// guard compacts the oldest observations when a run approaches it.
+	ContextTokenBudget int
 
 	Logger *slog.Logger
 	// Now is injectable so a test can pin the date the prompt reports.
@@ -110,6 +159,7 @@ type Orchestrator struct {
 	maxIterations       int
 	toolTimeout         time.Duration
 	maxToolContentChars int
+	contextTokenBudget  int
 
 	logger *slog.Logger
 	now    func() time.Time
@@ -139,6 +189,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		maxIterations:       cfg.MaxIterations,
 		toolTimeout:         cfg.ToolTimeout,
 		maxToolContentChars: cfg.MaxToolContentChars,
+		contextTokenBudget:  cfg.ContextTokenBudget,
 		logger:              cfg.Logger,
 		now:                 cfg.Now,
 	}
@@ -153,6 +204,9 @@ func New(cfg Config) (*Orchestrator, error) {
 	}
 	if o.maxToolContentChars <= 0 {
 		o.maxToolContentChars = DefaultMaxToolContentChars
+	}
+	if o.contextTokenBudget <= 0 {
+		o.contextTokenBudget = DefaultContextTokenBudget
 	}
 	if o.logger == nil {
 		o.logger = slog.Default()
@@ -184,12 +238,36 @@ type runState struct {
 	// claiming zero evidence for a call that handed the model three citable
 	// documents would make the trace lie. Re-registering the evidence is free:
 	// the (run, source, external_id) constraint makes the insert idempotent.
+	//
+	// The cache deliberately keeps the fenced ORIGINAL observation even after
+	// the context guard compacts the copy in the transcript. A model that
+	// re-issues a call whose result was summarized away is signalling the
+	// summary was not enough; the cache hit hands the full result back as a
+	// fresh tool message under a new tool_call_id, recorded through the
+	// normal tool_call_finished event, so replay stays exact — and that new
+	// message is itself compactable later.
 	cache map[string]cachedResult
+
+	// compacted records which tool messages (by ToolCallID) the context guard
+	// has already rewritten, so repeated passes touch disjoint, newer
+	// messages instead of re-summarizing a summary.
+	compacted map[string]bool
 
 	// checked records that the completeness check has already run. It fires at
 	// most once per run: the check exists to stop an answer that skipped a lead,
 	// not to argue with the model until it agrees.
 	checked bool
+
+	// toolSuccesses counts tool calls that produced an observation the model
+	// can use. Cache hits count: the total-outage guard is about the
+	// environment being unreachable, and a served-from-cache result is a
+	// usable one.
+	toolSuccesses int
+	// consecutiveToolFailures counts EXECUTION failures in a row —
+	// executeWithRetry returned an error. Validation failures (unknown tool,
+	// malformed or schema-invalid arguments) are the model's mistake, not the
+	// environment's, so they neither increment nor reset the streak.
+	consecutiveToolFailures int
 
 	iterations   int
 	toolCalls    int
@@ -278,9 +356,10 @@ func safeReason(err error) string {
 // so that a run is either fully started or not started at all.
 func (o *Orchestrator) begin(ctx context.Context, runID uuid.UUID) (*runState, bool, error) {
 	state := &runState{
-		runID:   runID,
-		started: o.now(),
-		cache:   make(map[string]cachedResult),
+		runID:     runID,
+		started:   o.now(),
+		cache:     make(map[string]cachedResult),
+		compacted: make(map[string]bool),
 	}
 
 	claimed := true
@@ -340,6 +419,13 @@ func (o *Orchestrator) investigate(ctx context.Context, state *runState) (answer
 
 	for iteration := 1; iteration <= o.maxIterations; iteration++ {
 		state.iterations = iteration
+
+		// The context guard runs before the generation that would pay for an
+		// oversized transcript, not after: the observations appended at the
+		// end of the previous iteration are exactly what can blow the budget.
+		if err := o.compactIfNeeded(ctx, state, iteration); err != nil {
+			return "", false, err
+		}
 
 		purpose := PurposeAgentLoop
 		if len(pending) > 0 {
@@ -406,12 +492,29 @@ func (o *Orchestrator) investigate(ctx context.Context, state *runState) (answer
 				ToolCallID: call.ID,
 			})
 			state.toolCalls++
+
+			// The total-outage guard sits here — after the failed call's
+			// tool_call_finished event and tool_calls row are durably
+			// recorded — so the trace of a failed run still shows exactly
+			// what was tried. Failing beats spending the remaining paid
+			// iterations against sources that are down; the error is our own
+			// text (no URLs or credentials), safe for safeReason to persist
+			// verbatim.
+			if state.toolSuccesses == 0 && state.consecutiveToolFailures >= totalOutageThreshold {
+				return "", false, fmt.Errorf(
+					"agent: external sources unreachable: %d consecutive tool failures and no successful tool call",
+					state.consecutiveToolFailures)
+			}
 		}
 	}
 
 	// The cap was reached (or the model stalled): ask for the best answer the
 	// gathered evidence supports, with no tools attached so it cannot keep
-	// investigating.
+	// investigating. The transcript is at its longest right here, so the
+	// context guard gets one more look before the forced call.
+	if err := o.compactIfNeeded(ctx, state, state.iterations); err != nil {
+		return "", false, err
+	}
 	resp, err := o.generate(ctx, state, state.iterations, PurposeFinalAnswer, nil,
 		llm.Message{Role: llm.RoleUser, Content: forcedAnswerInstruction})
 	if err != nil {
@@ -477,8 +580,10 @@ func (o *Orchestrator) generate(
 }
 
 // summarize is a provider call outside the run transcript: it compresses one
-// oversized tool result and must not see the conversation.
-func (o *Orchestrator) summarize(ctx context.Context, state *runState, iteration int, overflow string) (string, error) {
+// piece of tool output and must not see the conversation. purpose is what the
+// llm_calls row records — PurposeToolOutputSummary for an oversized fresh
+// result, PurposeContextCompaction for an old observation being compacted.
+func (o *Orchestrator) summarize(ctx context.Context, state *runState, iteration int, purpose, overflow string) (string, error) {
 	callCtx, cancel := context.WithTimeout(ctx, llmTimeout)
 	defer cancel()
 
@@ -501,11 +606,138 @@ func (o *Orchestrator) summarize(ctx context.Context, state *runState, iteration
 	state.inputTokens += resp.InputTokens
 	state.outputTokens += resp.OutputTokens
 
-	if err := o.recordLLMCall(ctx, state, iteration, PurposeToolOutputSummary,
+	if err := o.recordLLMCall(ctx, state, iteration, purpose,
 		o.utilityModel, request, resp, latency, nil); err != nil {
 		return "", err
 	}
 	return resp.Text, nil
+}
+
+// estimateTokens approximates the size of a transcript at the usual
+// chars-per-token rule of thumb. It counts the system prompt, every message's
+// content, and tool-call arguments (which are re-sent on every iteration just
+// like content). Deliberately a pure function: the guard built on it is
+// deterministic and testable with no provider.
+func estimateTokens(system string, messages []llm.Message) int {
+	chars := len(system)
+	for _, m := range messages {
+		chars += len(m.Content)
+		for _, tc := range m.ToolCalls {
+			chars += len(tc.Name) + len(tc.Arguments)
+		}
+	}
+	return chars / estimateCharsPerToken
+}
+
+// compactIfNeeded brings the transcript back under the context token budget
+// by replacing the oldest tool observations with utility-model summaries.
+//
+// The rewrite is recorded as a context_compaction event carrying the full
+// replacement text per tool call, so ReconstructTranscript can replay it as a
+// verbatim substitution — the replay invariant survives the transcript being
+// edited in place. The newest observations are never touched: they are what
+// the model is actively reasoning about.
+func (o *Orchestrator) compactIfNeeded(ctx context.Context, state *runState, iteration int) error {
+	before := estimateTokens(state.system, state.messages)
+	if before <= o.contextTokenBudget {
+		return nil
+	}
+	target := o.contextTokenBudget - o.contextTokenBudget/compactHeadroomDivisor
+
+	// Indices of compactable tool messages, oldest first: not among the
+	// newest keepRecentToolMessages, not already compacted.
+	var toolIndices []int
+	for i, m := range state.messages {
+		if m.Role == llm.RoleTool && !state.compacted[m.ToolCallID] {
+			toolIndices = append(toolIndices, i)
+		}
+	}
+	if len(toolIndices) > keepRecentToolMessages {
+		toolIndices = toolIndices[:len(toolIndices)-keepRecentToolMessages]
+	} else {
+		toolIndices = nil
+	}
+
+	estimate := before
+	var entries []compactionEntry
+	for _, i := range toolIndices {
+		if estimate <= target {
+			break
+		}
+		content := state.messages[i].Content
+		originalChars := len([]rune(content))
+		if originalChars < compactMinChars {
+			continue
+		}
+
+		// Same cap fitToContext applies before its summarize call, for the
+		// same reason: an input past the utility model's window buys a
+		// guaranteed context-length rejection after a 90s wait. Only
+		// reachable when MaxToolContentChars is configured far above the
+		// default, but the doomed call is worth one slice either way.
+		summarizerInput := content
+		if inputRunes := []rune(summarizerInput); len(inputRunes) > maxSummarizerInputChars {
+			summarizerInput = string(inputRunes[:maxSummarizerInputChars])
+		}
+
+		summary, err := o.summarize(ctx, state, iteration, PurposeContextCompaction, summarizerInput)
+		if err != nil || strings.TrimSpace(summary) == "" {
+			// The guard must keep working exactly when the provider is
+			// degraded, so the fallback is a deterministic hard cut. Replay
+			// is unaffected by which path produced the text: the event
+			// carries the replacement verbatim either way.
+			if err != nil {
+				o.logger.Warn("agent: compaction summarization failed, hard-cutting instead",
+					"run_id", state.runID, "error", err)
+			}
+			runes := []rune(content)
+			cut := min(compactFallbackChars, len(runes))
+			summary = string(runes[:cut]) + "\n[…the rest of this result was dropped during compaction]"
+		}
+
+		// Re-fenced as untrusted: the summary is derived from third-party
+		// text. The marker line is ours and sits first inside the fence so
+		// the model knows this observation is lossy.
+		replacement := fence("tool_result", ` compacted="true"`,
+			fmt.Sprintf("[compacted: summary of an earlier tool result, %d chars original]\n%s",
+				originalChars, summary))
+
+		state.messages[i].Content = replacement
+		state.compacted[state.messages[i].ToolCallID] = true
+		entries = append(entries, compactionEntry{
+			ToolCallID:    state.messages[i].ToolCallID,
+			Content:       replacement,
+			OriginalChars: originalChars,
+		})
+		estimate = estimateTokens(state.system, state.messages)
+	}
+
+	if len(entries) == 0 {
+		// Everything is recent, small, or already compacted. Nothing safe to
+		// shrink — carry on; the iteration cap still bounds the run.
+		o.logger.Warn("agent: transcript over context budget but nothing compactable",
+			"run_id", state.runID, "estimated_tokens", before, "budget", o.contextTokenBudget)
+		return nil
+	}
+
+	after := estimateTokens(state.system, state.messages)
+	o.logger.Info("agent: compacted transcript",
+		"run_id", state.runID, "compacted", len(entries),
+		"tokens_before", before, "tokens_after", after, "budget", o.contextTokenBudget)
+
+	err := o.withTx(ctx, func(q store.Querier) error {
+		return appendEvent(ctx, q, state.runID, EventContextCompaction, contextCompactionPayload{
+			Iteration:    iteration,
+			TokensBefore: before,
+			TokensAfter:  after,
+			Budget:       o.contextTokenBudget,
+			Compactions:  entries,
+		})
+	})
+	if err != nil {
+		return fmt.Errorf("record context compaction: %w", err)
+	}
+	return nil
 }
 
 // recordLLMCall writes the llm_calls row and the llm_call event for one
@@ -635,6 +867,8 @@ func (o *Orchestrator) runTool(ctx context.Context, state *runState, iteration i
 
 	cacheKey := call.Name + "|" + canonical
 	if cached, hit := state.cache[cacheKey]; hit {
+		state.toolSuccesses++
+		state.consecutiveToolFailures = 0
 		return finish(cached.observation, "ok", "", toolOutcome{
 			cacheHit:  true,
 			rawLength: len(cached.observation),
@@ -645,6 +879,7 @@ func (o *Orchestrator) runTool(ctx context.Context, state *runState, iteration i
 
 	result, execErr := o.executeWithRetry(ctx, tool, call.Arguments)
 	if execErr != nil {
+		state.consecutiveToolFailures++
 		o.logger.Warn("agent: tool execution failed",
 			"run_id", state.runID, "tool", call.Name, "error", execErr)
 		// Reported to the model verbatim: Jira's own messages explain a bad JQL
@@ -653,6 +888,9 @@ func (o *Orchestrator) runTool(ctx context.Context, state *runState, iteration i
 		// persist.
 		return finish(fmt.Sprintf("Error: %v", execErr), "error", execErr.Error(), toolOutcome{})
 	}
+
+	state.toolSuccesses++
+	state.consecutiveToolFailures = 0
 
 	observation, outcome := o.fitToContext(ctx, state, iteration, result)
 	// Fence the result before it enters the transcript. Everything a tool returns
@@ -803,9 +1041,13 @@ func fenceUntrusted(toolName, content string) string {
 // both get the same guarantee: the content cannot close its own fence and
 // impersonate the transcript around it. Any closing tag inside is defanged with
 // a division slash, which reads identically to a human and is not the tag.
+// The match is deliberately loose \u2014 case-insensitive, whitespace tolerated
+// around the tag name \u2014 because models parse pseudo-XML loosely, so an exact
+// byte match would leave `</Tool_Result >` working as an escape.
 func fence(tag, attrs, content string) string {
 	closing := "</" + tag + ">"
-	safe := strings.ReplaceAll(content, closing, "<\u2215"+tag+">")
+	pattern := regexp.MustCompile(`(?i)</\s*` + regexp.QuoteMeta(tag) + `\s*>`)
+	safe := pattern.ReplaceAllString(content, "<\u2215"+tag+">")
 	return fmt.Sprintf("<%s%s trust=%q>\n", tag, attrs, "untrusted") + safe + "\n" + closing
 }
 
@@ -916,7 +1158,7 @@ func (o *Orchestrator) fitToContext(ctx context.Context, state *runState, iterat
 		overflow = string(overflowRunes[:maxSummarizerInputChars])
 	}
 
-	summary, err := o.summarize(ctx, state, iteration, overflow)
+	summary, err := o.summarize(ctx, state, iteration, PurposeToolOutputSummary, overflow)
 	if err != nil || strings.TrimSpace(summary) == "" {
 		// Summarization is a nicety; losing it must not lose the run. Fall back
 		// to a hard cut, and say so in the observation.

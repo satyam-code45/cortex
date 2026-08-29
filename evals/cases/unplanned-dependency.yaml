@@ -1,0 +1,16 @@
+id: unplanned-dependency
+question: "Which blocked Atlas issues rest on a dependency the Q2 plan never anticipated?"
+expected_answer: >-
+  The chargeback webhook receiver, owned by Diego Santos. The Q2 plan assumed
+  the v2 webhook signing document would carry over to v3 and recorded that
+  assumption as a risk; it did not — the header name and canonicalisation both
+  changed in v3 and the v3 specification was unpublished until 2026-08-03. The
+  other blocked issues all rest on the sandbox dependency the plan did
+  anticipate.
+expected_sources:
+  - "Atlas Q2 Plan"
+  - "Chargeback webhook receiver"
+category: multi-hop
+# The hardest chain in the suite: plan risks (Notion) x blocked issues (Jira)
+# x vendor confirmation (Gmail), plus distinguishing planned from unplanned.
+max_tool_calls: 12

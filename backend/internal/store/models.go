@@ -65,6 +65,13 @@ type DocumentChunk struct {
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
+type EvalRun struct {
+	ID        uuid.UUID          `json:"id"`
+	GitSha    string             `json:"git_sha"`
+	StartedAt pgtype.Timestamptz `json:"started_at"`
+	Metrics   []byte             `json:"metrics"`
+}
+
 type Evidence struct {
 	ID              uuid.UUID          `json:"id"`
 	AgentRunID      uuid.UUID          `json:"agent_run_id"`

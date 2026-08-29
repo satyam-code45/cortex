@@ -420,8 +420,14 @@ func (t *getIssueHistoryTool) Execute(ctx context.Context, args json.RawMessage)
 			b.WriteString(change)
 			b.WriteString("\n")
 			evidence = append(evidence, tools.EvidenceItem{
-				Source:     sourceJira,
-				ExternalID: key,
+				Source: sourceJira,
+				// Distinct per change, so each keeps its own snippet. Evidence
+				// dedupes per run on (source, external_id) with first-snippet-
+				// wins; a bare key here made every change — and the issue row
+				// itself — collapse into one row, and a citation could then
+				// never point at the specific transition that supports a
+				// claim like "the due date moved twice".
+				ExternalID: fmt.Sprintf("%s#change-%s-%s", key, entry.ID, item.Field),
 				Title:      fmt.Sprintf("%s change history: %s", key, item.Field),
 				URL:        t.client.BrowseURL(key),
 				Snippet:    snippet(change),
@@ -483,8 +489,12 @@ func (t *getCommentsTool) Execute(ctx context.Context, args json.RawMessage) (to
 		date := formatDate(c.Created)
 		fmt.Fprintf(&b, "[%d] %s | %s\n%s\n", i+1, date, author, body)
 		evidence = append(evidence, tools.EvidenceItem{
-			Source:     sourceJira,
-			ExternalID: key,
+			Source: sourceJira,
+			// Distinct per comment for the same reason the changelog entries
+			// are: with a bare key, only the first comment's snippet survived
+			// the per-run dedupe, so a decision made in comment five could
+			// never be cited.
+			ExternalID: fmt.Sprintf("%s#comment-%s", key, c.ID),
 			Title:      fmt.Sprintf("%s comment by %s", key, author),
 			URL:        t.client.BrowseURL(key),
 			Snippet:    snippet(body),

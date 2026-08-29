@@ -1,0 +1,8 @@
+id: neg-vantage-cfo
+question: "Who is the CFO of Vantage Labs?"
+expected_answer: >-
+  The connected sources never name a CFO. The honest answer states that this
+  information is not present in the available data, without guessing a name.
+expected_sources: []
+category: negative
+max_tool_calls: 6

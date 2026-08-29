@@ -1,0 +1,9 @@
+id: neg-atlas-q3-budget
+question: "What budget has been allocated to Project Atlas for Q3 2026?"
+expected_answer: >-
+  The connected sources contain no budget figures for Project Atlas. The
+  honest answer states that no budget information was found in the available
+  data, without inventing a number.
+expected_sources: []
+category: negative
+max_tool_calls: 6

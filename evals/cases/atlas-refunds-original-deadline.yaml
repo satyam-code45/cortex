@@ -1,0 +1,12 @@
+id: atlas-refunds-original-deadline
+question: >-
+  What was the original due date of the Atlas issue "Integrate refunds API
+  with the payment provider sandbox", and how many times did it move?
+expected_answer: >-
+  The refunds API integration was originally due 2026-06-15. It moved twice,
+  to 2026-07-10 and then to 2026-08-07, both times because the payment
+  provider had not delivered the v3 refunds sandbox.
+expected_sources:
+  - "Integrate refunds API with the payment provider sandbox"
+category: single-hop
+max_tool_calls: 6

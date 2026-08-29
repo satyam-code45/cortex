@@ -370,12 +370,17 @@ func TestGetIssueHistoryMapsChangelog(t *testing.T) {
 	}
 
 	// One evidence item per changed field, all timestamped at the entry's date.
+	// External ids are distinct per change (key#change-<entry>-<field>): the
+	// per-run evidence dedupe keys on (source, external_id) with the first
+	// snippet winning, so a shared bare key would collapse every change — and
+	// the issue row itself — into one row, leaving nothing citable but the
+	// first transition.
 	if len(result.Evidence) != 3 {
 		t.Fatalf("evidence items = %d, want 3 (one per field change)", len(result.Evidence))
 	}
-	assertEvidence(t, result.Evidence[0], "ATLAS-101", client.BrowseURL("ATLAS-101"), "2026-05-20T14:03:11Z")
-	assertEvidence(t, result.Evidence[1], "ATLAS-101", client.BrowseURL("ATLAS-101"), "2026-06-01T11:45:00Z")
-	assertEvidence(t, result.Evidence[2], "ATLAS-101", client.BrowseURL("ATLAS-101"), "2026-06-01T11:45:00Z")
+	assertEvidence(t, result.Evidence[0], "ATLAS-101#change-40001-duedate", client.BrowseURL("ATLAS-101"), "2026-05-20T14:03:11Z")
+	assertEvidence(t, result.Evidence[1], "ATLAS-101#change-40002-status", client.BrowseURL("ATLAS-101"), "2026-06-01T11:45:00Z")
+	assertEvidence(t, result.Evidence[2], "ATLAS-101#change-40002-assignee", client.BrowseURL("ATLAS-101"), "2026-06-01T11:45:00Z")
 }
 
 // An issue with no recorded changes says so plainly. The seeder's whole
@@ -438,8 +443,11 @@ func TestGetCommentsMapsThread(t *testing.T) {
 	if len(result.Evidence) != 2 {
 		t.Fatalf("evidence items = %d, want 2 (one per comment)", len(result.Evidence))
 	}
-	assertEvidence(t, result.Evidence[0], "ATLAS-101", client.BrowseURL("ATLAS-101"), "2026-05-28T16:20:05Z")
-	assertEvidence(t, result.Evidence[1], "ATLAS-101", client.BrowseURL("ATLAS-101"), "2026-06-11T09:02:00Z")
+	// Distinct per comment (key#comment-<id>) so a decision made in a later
+	// comment stays citable — see the history test above for the dedupe
+	// rationale.
+	assertEvidence(t, result.Evidence[0], "ATLAS-101#comment-70001", client.BrowseURL("ATLAS-101"), "2026-05-28T16:20:05Z")
+	assertEvidence(t, result.Evidence[1], "ATLAS-101#comment-70002", client.BrowseURL("ATLAS-101"), "2026-06-11T09:02:00Z")
 	if !strings.Contains(result.Evidence[0].Title, "Priya Raman") {
 		t.Errorf("evidence title = %q, want the comment's author", result.Evidence[0].Title)
 	}

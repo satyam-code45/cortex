@@ -1,0 +1,14 @@
+id: vendor-name-discovery
+question: >-
+  Which company is the payment provider that is blocking the Atlas refunds
+  work?
+expected_answer: >-
+  Nordwind Payments. The Jira issues only ever say "the provider"; the vendor
+  is named in the Atlas Q2 Plan in Notion (and in the delay-notice emails from
+  Nordwind).
+expected_sources:
+  - "Atlas Q2 Plan"
+category: cross-source
+# Discovering that Jira never names the vendor takes several Jira reads
+# before the pivot to Notion.
+max_tool_calls: 12

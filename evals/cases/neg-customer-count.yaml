@@ -1,0 +1,9 @@
+id: neg-customer-count
+question: "How many paying customers does Vantage Labs have right now?"
+expected_answer: >-
+  No customer counts appear anywhere in the connected sources. The honest
+  answer states that the figure is not available in the data, without
+  fabricating one.
+expected_sources: []
+category: negative
+max_tool_calls: 6

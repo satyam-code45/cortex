@@ -1,0 +1,10 @@
+id: beacon-identity-owner
+question: "Who owns the Beacon identity resolution rewrite, and why did its deadline move?"
+expected_answer: >-
+  Nadia Haddad owns the identity resolution rewrite. Its deadline moved
+  because the scope grew after the shared-IP mis-merge bug (customers sharing
+  an office IP were wrongly merged).
+expected_sources:
+  - "Identity resolution rewrite"
+category: single-hop
+max_tool_calls: 6

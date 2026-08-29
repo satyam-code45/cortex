@@ -71,8 +71,11 @@ seed-gmail: ## Gmail only (~16 backdated fixture emails); needs `make gmail-auth
 gmail-auth: ## authorize Gmail once and cache the refresh token
 	cd backend && go run ./cmd/gmail-auth
 
+# EVAL_FLAGS passes through to the runner, e.g.
+#   make eval EVAL_FLAGS='-case atlas-blocked-issues'
+#   make eval EVAL_FLAGS='-concurrency 2'
 eval: ## run the evaluation suite
-	cd backend && go run ./cmd/eval
+	cd backend && go run ./cmd/eval $(EVAL_FLAGS)
 
 # The Content-Type header is required, not decorative: the endpoint rejects a
 # request without it, which is what forces a browser to preflight it and stops

@@ -11,6 +11,7 @@ require (
 	github.com/riverqueue/river v0.44.0
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.44.0
 	github.com/riverqueue/river/rivertype v0.44.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

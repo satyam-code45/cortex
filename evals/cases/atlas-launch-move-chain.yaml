@@ -1,0 +1,12 @@
+id: atlas-launch-move-chain
+question: "Why did the Atlas billing launch move from June to August?"
+expected_answer: >-
+  The launch moved from 2026-06-30 to 2026-08-14 because the refunds epic was
+  blocked on the payment provider's v3 refunds sandbox, and the launch
+  readiness review was a no-go on the grounds that a biller which cannot
+  process a refund is not launchable.
+expected_sources:
+  - "Launch readiness review for the billing platform"
+  - "Integrate refunds API with the payment provider sandbox"
+category: multi-hop
+max_tool_calls: 9

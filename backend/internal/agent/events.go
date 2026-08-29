@@ -40,6 +40,12 @@ const (
 	EventToolCallStarted = "tool_call_started"
 	// EventToolCallFinished records the observation handed back to the model.
 	EventToolCallFinished = "tool_call_finished"
+	// EventContextCompaction records the context guard rewriting old tool
+	// observations into summaries. The payload carries the FULL replacement
+	// text per tool_call_id, so replay is a verbatim substitution — nothing
+	// is re-derived, and the fencing format can evolve without breaking the
+	// replay of old runs.
+	EventContextCompaction = "context_compaction"
 	// EventCitations records the outcome of the citation pass: which markers
 	// survived, what they point at, and how many the validator dropped.
 	EventCitations = "citations"
@@ -58,6 +64,9 @@ const (
 	// PurposeToolOutputSummary is the utility-model call that compresses an
 	// oversized tool result.
 	PurposeToolOutputSummary = "tool_output_summary"
+	// PurposeContextCompaction is the utility-model call that summarizes one
+	// old observation when the transcript nears the context token budget.
+	PurposeContextCompaction = "context_compaction_summary"
 	// PurposeFinalAnswer is the forced answer after the iteration cap is hit.
 	PurposeFinalAnswer = "final_answer"
 
@@ -136,6 +145,29 @@ type toolCallFinishedPayload struct {
 	Error         string          `json:"error,omitempty"`
 	CacheHit      bool            `json:"cache_hit"`
 	LatencyMS     int64           `json:"latency_ms"`
+}
+
+// contextCompactionPayload is the payload of EventContextCompaction.
+type contextCompactionPayload struct {
+	Iteration    int `json:"iteration"`
+	TokensBefore int `json:"tokens_before"`
+	TokensAfter  int `json:"tokens_after"`
+	Budget       int `json:"budget"`
+	// Compactions is ordered oldest-first, matching the order the live loop
+	// applied them.
+	Compactions []compactionEntry `json:"compactions"`
+}
+
+// compactionEntry is one observation rewritten by the context guard.
+type compactionEntry struct {
+	ToolCallID string `json:"tool_call_id"`
+	// Content is the complete replacement observation, byte-identical to what
+	// now sits in the live transcript — fence and compaction marker included.
+	Content string `json:"content"`
+	// OriginalChars is the size of the observation that was replaced, so a
+	// trace can show what compaction cost without storing the original twice
+	// (it is already in this run's tool_call_finished event).
+	OriginalChars int `json:"original_chars"`
 }
 
 // citationsPayload is the payload of EventCitations.
@@ -343,10 +375,38 @@ func ReconstructTranscript(events []store.RunEvent) (system string, messages []l
 				ToolCallID: payload.ToolCallID,
 			})
 
+		case EventContextCompaction:
+			var payload contextCompactionPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				return "", nil, fmt.Errorf("decode %s payload (seq %d): %w", event.Type, event.Seq, err)
+			}
+			// Verbatim substitution by ToolCallID. The tool message always
+			// exists by now: it was appended by an earlier tool_call_finished
+			// event, and events are processed in seq order. A missing one
+			// means a corrupted log, which must fail loudly — silently
+			// skipping would hand a resumed run a transcript the model never
+			// saw.
+			for _, entry := range payload.Compactions {
+				found := false
+				for i := range messages {
+					if messages[i].Role == llm.RoleTool && messages[i].ToolCallID == entry.ToolCallID {
+						messages[i].Content = entry.Content
+						found = true
+						break
+					}
+				}
+				if !found {
+					return "", nil, fmt.Errorf(
+						"context_compaction (seq %d) references tool call %s not in transcript",
+						event.Seq, entry.ToolCallID)
+				}
+			}
+
 		default:
-			// run_started/llm_call/tool_call_finished are the only events that
-			// contribute turns. tool_call_started, citations, answer,
-			// run_finished and run_failed are observability, not conversation.
+			// run_started/llm_call/tool_call_finished/context_compaction are
+			// the only events that contribute to the transcript.
+			// tool_call_started, citations, answer, run_finished and
+			// run_failed are observability, not conversation.
 		}
 	}
 	return system, messages, nil

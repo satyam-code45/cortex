@@ -1,0 +1,10 @@
+id: team-blocked-atlas-work
+question: "Which Atlas work was held up by another team rather than by a vendor?"
+expected_answer: >-
+  The usage event schema alignment was held up by Beacon, which could not
+  freeze the v2 event envelope until the identity resolution rewrite landed.
+expected_sources:
+  - "Usage event schema alignment with Beacon"
+  - "Freeze the v2 event envelope"
+category: multi-hop
+max_tool_calls: 9

@@ -1,0 +1,10 @@
+id: launch-decision-chain
+question: "Who recommended moving the Atlas launch to 14 August, and who approved it?"
+expected_answer: >-
+  Marcus Whitfield recommended moving the launch to 14 August on 2026-06-11,
+  on the grounds that a biller which cannot process a refund is not
+  launchable, and Fatima Al-Rashid approved it on 2026-06-12.
+expected_sources:
+  - "recommending we move to 14 August"
+category: multi-hop
+max_tool_calls: 9

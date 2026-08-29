@@ -10,31 +10,20 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"slices"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
-	"cortex/internal/agent"
 	"cortex/internal/api"
+	"cortex/internal/app"
 	"cortex/internal/config"
 	"cortex/internal/jobs"
-	"cortex/internal/llm"
-	"cortex/internal/rag"
-	"cortex/internal/tools"
-	"cortex/internal/tools/gmail"
-	"cortex/internal/tools/jira"
-	"cortex/internal/tools/notion"
 )
 
 const (
 	// devUserEmail is the single hardcoded user until auth lands.
 	devUserEmail = "dev@cortex.local"
 
-	// dbConnectTimeout bounds the startup connectivity check.
-	dbConnectTimeout = 10 * time.Second
 	// shutdownTimeout is how long in-flight requests get to drain.
 	shutdownTimeout = 10 * time.Second
 	// readHeaderTimeout guards against slow-header (Slowloris) clients.
@@ -78,120 +67,23 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	// The shared graph — provider, source clients, indexer, tool registry,
+	// orchestrator — is assembled by internal/app so cmd/eval runs exactly the
+	// same agent this server does.
+	deps, err := app.Build(ctx, cfg, logger)
 	if err != nil {
-		return fmt.Errorf("connect to database: %w", err)
+		return err
 	}
-	defer pool.Close()
+	defer deps.Close()
+	logger.Info("tools registered",
+		"count", deps.Registry.Len(), "names", strings.Join(deps.Registry.Names(), ", "))
 
-	pingCtx, cancelPing := context.WithTimeout(ctx, dbConnectTimeout)
-	defer cancelPing()
-	if err := pool.Ping(pingCtx); err != nil {
-		return fmt.Errorf("ping database: %w", err)
-	}
-	logger.Info("connected to database")
-
-	provider := llm.NewOpenAI(llm.OpenAIConfig{
-		APIKey:         cfg.OpenAIAPIKey,
-		BaseURL:        cfg.OpenAIBaseURL,
-		DefaultModel:   cfg.LLMModel,
-		EmbeddingModel: cfg.EmbeddingModel,
-	})
-
-	jiraClient, err := jira.NewClient(jira.Config{
-		BaseURL:  cfg.JiraBaseURL,
-		Email:    cfg.JiraEmail,
-		APIToken: cfg.JiraAPIToken,
-		Logger:   logger,
-	})
+	worker, err := jobs.NewAgentRunWorker(deps.Orchestrator, logger)
 	if err != nil {
 		return err
 	}
 
-	notionClient, err := notion.NewClient(notion.Config{
-		Token:  cfg.NotionToken,
-		Logger: logger,
-	})
-	if err != nil {
-		return err
-	}
-
-	gmailClient, err := buildGmailClient(cfg, logger)
-	if err != nil {
-		return err
-	}
-
-	// The indexing sources are the same three clients the tools use, wrapped so
-	// the RAG layer can crawl them. Sharing the client means the index is built
-	// from exactly the text the agent reads live — and, for Gmail, that the crawl
-	// honours GMAIL_QUERY_SCOPE, so a scoped deployment cannot quietly embed
-	// personal mail.
-	indexer, err := rag.New(rag.Config{
-		DB:       pool,
-		Embedder: provider,
-		Sources: []tools.DocumentSource{
-			jira.NewSource(jiraClient, cfg.IndexMaxDocuments, cfg.JiraProjects, logger),
-			notion.NewSource(notionClient, cfg.IndexMaxDocuments, logger),
-			gmail.NewSource(gmailClient, cfg.IndexMaxDocuments, logger),
-		},
-		MaxDocuments: cfg.IndexMaxDocuments,
-		// Passed explicitly rather than left to the zero value. rag.Config
-		// treats a zero OverlapTokens as "no overlap" — a legitimate thing for a
-		// caller to ask for — so omitting it here silently indexed production
-		// with none, against REQ-4.5's 500/50.
-		ChunkTokens:   rag.DefaultChunkTokens,
-		OverlapTokens: rag.DefaultOverlapTokens,
-		Logger:        logger,
-	})
-	if err != nil {
-		return err
-	}
-
-	knowledgeBase, err := rag.NewSearchTool(rag.SearchConfig{
-		DB:       pool,
-		Embedder: provider,
-		Sources:  indexer.Sources(),
-		Logger:   logger,
-	})
-	if err != nil {
-		return err
-	}
-
-	// Nine tools: eight live ones across three sources, plus the knowledge base
-	// over all three. The registry is assembled in one place so a missing source
-	// is a startup failure rather than a silently smaller tool set: an agent that
-	// never learns email exists will still answer a question whose answer is only
-	// in email, and it will answer it wrongly.
-	registry, err := tools.NewRegistry(slices.Concat(
-		jira.NewTools(jiraClient),
-		notion.NewTools(notionClient),
-		gmail.NewTools(gmailClient),
-		[]tools.Tool{knowledgeBase},
-	)...)
-	if err != nil {
-		return err
-	}
-	logger.Info("tools registered", "count", registry.Len(), "names", strings.Join(registry.Names(), ", "))
-
-	orchestrator, err := agent.New(agent.Config{
-		DB:            pool,
-		Provider:      provider,
-		Registry:      registry,
-		Model:         cfg.LLMModel,
-		UtilityModel:  cfg.LLMUtilityModel,
-		MaxIterations: cfg.MaxIterations,
-		Logger:        logger,
-	})
-	if err != nil {
-		return err
-	}
-
-	worker, err := jobs.NewAgentRunWorker(orchestrator, logger)
-	if err != nil {
-		return err
-	}
-
-	indexWorker, err := jobs.NewIndexSourceWorker(indexer, logger)
+	indexWorker, err := jobs.NewIndexSourceWorker(deps.Indexer, logger)
 	if err != nil {
 		return err
 	}
@@ -200,7 +92,7 @@ func run(logger *slog.Logger) error {
 	// one database). River polls Postgres for jobs, so there is nothing to
 	// coordinate between them beyond sharing the pool.
 	queue, err := jobs.New(jobs.Config{
-		Pool:         pool,
+		Pool:         deps.Pool,
 		Worker:       worker,
 		IndexWorker:  indexWorker,
 		MaxWorkers:   cfg.AgentRunWorkers,
@@ -222,7 +114,7 @@ func run(logger *slog.Logger) error {
 	logger.Info("queue workers started",
 		"agent_queue", jobs.AgentRunQueue, "agent_workers", cfg.AgentRunWorkers,
 		"index_queue", jobs.IndexSourceQueue, "index_workers", cfg.IndexWorkers,
-		"tools", registry.Len())
+		"tools", deps.Registry.Len())
 
 	// There is no authentication yet, and Day 4 widened what an unauthenticated
 	// reader gets: GET /api/runs/{id}/trace returns full tool observations
@@ -237,11 +129,11 @@ func run(logger *slog.Logger) error {
 	}
 
 	handler := api.NewRouter(api.Deps{
-		DB:             pool,
+		DB:             deps.Pool,
 		Enqueuer:       queue,
 		Model:          cfg.LLMModel,
 		DevUserEmail:   devUserEmail,
-		IndexSources:   indexer.Sources(),
+		IndexSources:   deps.Indexer.Sources(),
 		FrontendOrigin: cfg.FrontendOrigin,
 		Logger:         logger,
 	})
@@ -307,35 +199,4 @@ func isLoopback(host string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
-}
-
-// buildGmailClient wires the cached refresh token into a Gmail client.
-//
-// This is the one credential the server cannot obtain for itself: the OAuth
-// flow needs a human at a browser, so cmd/gmail-auth performs it once and
-// leaves a refresh token behind. Failing here — loudly, naming the command that
-// fixes it — is the whole point. The alternative, starting without Gmail, gives
-// an agent that cannot see a third of the evidence and has no way to know it.
-func buildGmailClient(cfg *config.Config, logger *slog.Logger) (*gmail.Client, error) {
-	creds, err := gmail.LoadCredentials(cfg.GmailCredentialsPath)
-	if err != nil {
-		return nil, err
-	}
-	token, err := gmail.LoadToken(cfg.GmailTokenPath)
-	if err != nil {
-		return nil, err
-	}
-	source, err := gmail.NewTokenSource(gmail.TokenSourceConfig{
-		Credentials: creds,
-		Token:       token,
-		TokenPath:   cfg.GmailTokenPath,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return gmail.NewClient(gmail.Config{
-		TokenSource: source,
-		QueryScope:  cfg.GmailQueryScope,
-		Logger:      logger,
-	})
 }

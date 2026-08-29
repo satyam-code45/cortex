@@ -1,0 +1,11 @@
+id: comet-plan-mgmt-blocker
+question: "What is blocking the Comet in-app plan management screens?"
+expected_answer: >-
+  The in-app plan management screens are built against a mock and blocked on
+  Atlas exposing the real plan-change endpoint of its customer-facing billing
+  portal — an open cross-project dependency. (Either phrasing — "the plan-change
+  endpoint" or "the billing portal API" — identifies the same dependency.)
+expected_sources:
+  - "In-app plan management screens"
+category: single-hop
+max_tool_calls: 8

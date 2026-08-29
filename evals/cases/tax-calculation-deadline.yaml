@@ -1,0 +1,14 @@
+id: tax-calculation-deadline
+# The question deliberately asks only for the dates: the seeded comments
+# discuss compliance sign-off on rate storage but never state it as the
+# REASON for the date change, so a "why" here would grade honesty as failure.
+question: >-
+  What is the current due date of the Atlas tax calculation work, and what
+  was it originally?
+expected_answer: >-
+  The tax calculation for EU VAT and US sales tax is now due 2026-08-21; it
+  was originally due 2026-07-31.
+expected_sources:
+  - "Tax calculation for EU VAT and US sales tax"
+category: single-hop
+max_tool_calls: 6

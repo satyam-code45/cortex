@@ -1,0 +1,9 @@
+id: nordwind-sandbox-live
+question: "When did Nordwind's v3 refunds sandbox finally become available?"
+expected_answer: >-
+  Nordwind announced on 2026-08-05 that the v3 refunds sandbox was live, with
+  settlement files, at parity with production.
+expected_sources:
+  - "v3 refunds sandbox is live"
+category: single-hop
+max_tool_calls: 6

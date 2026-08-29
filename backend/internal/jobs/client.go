@@ -128,6 +128,13 @@ func New(cfg Config) (*Queue, error) {
 func (q *Queue) EnqueueAgentRun(ctx context.Context, tx pgx.Tx, runID uuid.UUID) error {
 	if _, err := q.client.InsertTx(ctx, tx, AgentRunArgs{RunID: runID}, &river.InsertOpts{
 		Queue: AgentRunQueue,
+		// Two attempts, not River's default of 25. The second attempt exists
+		// solely for a worker killed mid-run (StartAgentRun re-claims a
+		// 'running' row); every ordinary failure is already recorded as
+		// status=failed and returns nil to River, so a bigger budget could
+		// only re-spend LLM money on the rare could-not-record path. Index
+		// jobs keep the default: a crawl is idempotent and cheap to retry.
+		MaxAttempts: 2,
 	}); err != nil {
 		return fmt.Errorf("enqueue agent run %s: %w", runID, err)
 	}

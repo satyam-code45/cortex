@@ -1,0 +1,18 @@
+id: atlas-blocked-issues
+question: "Which issues in Project Atlas are blocked, and why?"
+expected_answer: >-
+  Four Atlas issues are currently blocked: the refunds API integration and the
+  chargeback webhook receiver are blocked directly on the payment provider —
+  the v3 refunds sandbox has not been delivered and the v3 webhook signing
+  spec has not been published. The refund reconciliation nightly job and the
+  support-agent refund request API are blocked transitively on the refunds
+  integration.
+expected_sources:
+  - "Integrate refunds API with the payment provider sandbox"
+  - "Chargeback webhook receiver"
+  - "Refund reconciliation nightly job"
+  - "Refund request API for support agents"
+category: single-hop
+# Search + comments across four blocked issues is legitimately ~10 calls; the
+# first baseline run answered correctly in 10.
+max_tool_calls: 12

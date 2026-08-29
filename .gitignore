@@ -13,5 +13,8 @@ node_modules/
 .next/
 frontend/out/
 
+# eval output (per-case JSONL; summaries persist to the eval_runs table)
+evals/results/
+
 # misc
 *.log

@@ -1,0 +1,13 @@
+id: beacon-envelope-frozen
+question: "When was Beacon's v2 event envelope frozen?"
+expected_answer: >-
+  The v2 event envelope was frozen on 2026-07-03, after slipping twice from
+  its original 2026-05-29 date because it waited on the identity resolution
+  rewrite.
+expected_sources:
+  # Substring chosen to match both the Jira issue ("Freeze the v2 event
+  # envelope") and the Gmail announcement ("Beacon: the v2 event envelope is
+  # frozen") — either is a legitimate place to find the answer.
+  - "v2 event envelope"
+category: single-hop
+max_tool_calls: 6

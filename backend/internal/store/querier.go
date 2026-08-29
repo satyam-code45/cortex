@@ -35,6 +35,7 @@ type Querier interface {
 	// is dynamic, since vector comes from an extension) at the cost of one cast per
 	// row on a path that is already dominated by the embedding API call.
 	InsertDocumentChunk(ctx context.Context, arg InsertDocumentChunkParams) error
+	InsertEvalRun(ctx context.Context, arg InsertEvalRunParams) (EvalRun, error)
 	// Per-run evidence numbering plus per-run dedupe in one statement.
 	//
 	// The conflict clause is a deliberate no-op update rather than DO NOTHING: the
@@ -66,6 +67,7 @@ type Querier interface {
 	// [2], hence the cast.
 	ListCitationsByRun(ctx context.Context, agentRunID uuid.UUID) ([]ListCitationsByRunRow, error)
 	ListConversationsByUser(ctx context.Context, userID uuid.UUID) ([]Conversation, error)
+	ListEvalRuns(ctx context.Context) ([]EvalRun, error)
 	ListEvidenceByRun(ctx context.Context, agentRunID uuid.UUID) ([]Evidence, error)
 	ListMessagesByConversation(ctx context.Context, conversationID uuid.UUID) ([]Message, error)
 	// Ordered by seq, not created_at: two events written inside one transaction can

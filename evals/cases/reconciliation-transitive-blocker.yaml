@@ -1,0 +1,14 @@
+id: reconciliation-transitive-blocker
+question: >-
+  Why can't the Atlas refund reconciliation nightly job proceed, and what is
+  the root cause behind it?
+expected_answer: >-
+  The refund reconciliation nightly job depends on the refunds API
+  integration, which is itself blocked because the payment provider has not
+  delivered the v3 refunds sandbox — the same provider sandbox delay, one hop
+  removed.
+expected_sources:
+  - "Refund reconciliation nightly job"
+  - "Integrate refunds API with the payment provider sandbox"
+category: multi-hop
+max_tool_calls: 9

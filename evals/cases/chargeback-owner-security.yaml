@@ -1,0 +1,11 @@
+id: chargeback-owner-security
+question: "Who owns the chargeback work and what is the security concern raised on it?"
+expected_answer: >-
+  Diego Santos owns the chargeback webhook receiver. Julian Vega objected to
+  shipping it without signature verification, because an unauthenticated
+  webhook that opens dispute records is an abuse vector even behind a feature
+  flag. It remains blocked rather than shipped unverified.
+expected_sources:
+  - "Chargeback webhook receiver"
+category: single-hop
+max_tool_calls: 6

@@ -1,0 +1,10 @@
+id: vendor-delay-contact
+question: "Who at the payment vendor told us about the delay, and when?"
+expected_answer: >-
+  Ines Brandt, Partner Success Manager at Nordwind Payments, told us about the
+  delay by email on 2026-06-08.
+expected_sources:
+  - "Atlas Q2 Plan"
+  - "refunds sandbox delayed"
+category: cross-source
+max_tool_calls: 9

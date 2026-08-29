@@ -1,0 +1,17 @@
+id: payment-delay-launch-impact
+question: "Why was the payment integration delayed and how did it affect the launch date?"
+expected_answer: >-
+  The Atlas billing launch moved from 2026-06-30 to 2026-08-14 because
+  Nordwind Payments, the payments vendor, failed to deliver the v3 refunds
+  sandbox it had committed to for 29 May — Nordwind's own settlement-ledger
+  migration overran, so the sandbox could not reach parity with production.
+  Ines Brandt of Nordwind gave notice by email on 2026-06-08 with no firm new
+  date. Without the sandbox the refunds integration could not be certified,
+  which blocked reconciliation and the support-agent refund API behind it.
+  Marcus Whitfield recommended the new date and Fatima Al-Rashid approved it.
+expected_sources:
+  - "Integrate refunds API with the payment provider sandbox"
+  - "Atlas Q2 Plan"
+  - "refunds sandbox delayed"
+category: cross-source
+max_tool_calls: 9
