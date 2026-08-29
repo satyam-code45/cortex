@@ -7,11 +7,19 @@ PORT ?= 8080
 DATABASE_URL ?= postgres://cortex:cortex@localhost:5432/cortex?sslmode=disable
 TEST_DATABASE_URL ?= postgres://cortex:cortex@localhost:5432/cortex_test?sslmode=disable
 
-.PHONY: dev migrate migrate-test river-migrate river-migrate-test sqlc test check \
+.PHONY: dev web migrate migrate-test river-migrate river-migrate-test sqlc test check check-web \
 	seed seed-plan seed-jira seed-notion seed-notion-replace seed-gmail gmail-auth eval index
 
 dev: ## run the API server (includes queue workers)
 	cd backend && go run ./cmd/server
+
+# PORT is overridden explicitly: this Makefile exports .env, where PORT is the
+# BACKEND's port (8080) — and `next dev` also honours PORT, so without the
+# override the frontend tries to bind the backend's address and dies with
+# EADDRINUSE.
+WEB_PORT ?= 3000
+web: ## run the frontend dev server
+	cd frontend && PORT=$(WEB_PORT) npm run dev
 
 # Two migration systems by design: goose owns application schema, River owns its
 # own (its DDL is not safely vendorable into goose -- see cmd/rivermigrate).
@@ -33,9 +41,12 @@ sqlc: ## regenerate type-safe query code
 test: migrate-test ## run all backend tests
 	cd backend && go test ./...
 
-check: migrate-test ## full gate: build + vet + test
+check: migrate-test check-web ## full gate: build + vet + test (backend + frontend)
 	cd backend && test -z "$$(gofmt -l .)" || { echo "gofmt needed:"; gofmt -l .; exit 1; }
 	cd backend && go build ./... && go vet ./... && go test ./...
+
+check-web: ## frontend gate: typecheck + tests
+	cd frontend && npx tsc --noEmit && npx vitest run
 
 seed: ## load every fixture set into Jira, Notion and Gmail
 	cd backend && go run ./cmd/seed --confirm

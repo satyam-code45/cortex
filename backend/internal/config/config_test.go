@@ -123,6 +123,7 @@ func TestLoad(t *testing.T) {
 				DatabaseURL:       testDatabaseURL,
 				Host:              "127.0.0.1",
 				Port:              "8080",
+				FrontendOrigin:    config.DefaultFrontendOrigin,
 				OpenAIAPIKey:      testAPIKey,
 				OpenAIBaseURL:     "",
 				LLMModel:          "gpt-4o",
@@ -158,6 +159,7 @@ func TestLoad(t *testing.T) {
 				DatabaseURL:       testDatabaseURL,
 				Host:              "0.0.0.0",
 				Port:              "9999",
+				FrontendOrigin:    config.DefaultFrontendOrigin,
 				OpenAIAPIKey:      testAPIKey,
 				OpenAIBaseURL:     "http://127.0.0.1:1234/v1/",
 				LLMModel:          "gpt-4.1",
@@ -189,6 +191,7 @@ func TestLoad(t *testing.T) {
 				DatabaseURL:       testDatabaseURL,
 				Host:              "127.0.0.1",
 				Port:              "8080",
+				FrontendOrigin:    config.DefaultFrontendOrigin,
 				OpenAIAPIKey:      testAPIKey,
 				LLMModel:          "gpt-4o",
 				LLMUtilityModel:   "gpt-4o-mini",
@@ -221,6 +224,7 @@ func TestLoad(t *testing.T) {
 				DatabaseURL:       testDatabaseURL,
 				Host:              "127.0.0.1",
 				Port:              "8080",
+				FrontendOrigin:    config.DefaultFrontendOrigin,
 				OpenAIAPIKey:      testAPIKey,
 				LLMModel:          "gpt-4o",
 				LLMUtilityModel:   "gpt-4o-mini",
@@ -251,6 +255,7 @@ func TestLoad(t *testing.T) {
 				DatabaseURL:       testDatabaseURL,
 				Host:              "127.0.0.1",
 				Port:              "8080",
+				FrontendOrigin:    config.DefaultFrontendOrigin,
 				OpenAIAPIKey:      testAPIKey,
 				LLMModel:          "gpt-4o",
 				LLMUtilityModel:   "gpt-4o-mini",
@@ -278,6 +283,7 @@ func TestLoad(t *testing.T) {
 				DatabaseURL:       testDatabaseURL,
 				Host:              "127.0.0.1",
 				Port:              "8080",
+				FrontendOrigin:    config.DefaultFrontendOrigin,
 				OpenAIAPIKey:      testAPIKey,
 				LLMModel:          "gpt-4o",
 				LLMUtilityModel:   "gpt-4o-mini",
@@ -297,12 +303,17 @@ func TestLoad(t *testing.T) {
 			},
 		},
 		{
-			name: "unrelated later-day vars are ignored",
-			env:  withEnv(map[string]string{"FRONTEND_ORIGIN": "http://localhost:3000"}),
+			// Was "unrelated later-day vars are ignored" until Day 5 started
+			// reading FRONTEND_ORIGIN. A trailing slash is trimmed because the
+			// value is compared byte-for-byte against the browser's Origin
+			// header, which never carries one.
+			name: "FRONTEND_ORIGIN is read and its trailing slash trimmed",
+			env:  withEnv(map[string]string{"FRONTEND_ORIGIN": "https://cortex.example/"}),
 			want: config.Config{
 				DatabaseURL:       testDatabaseURL,
 				Host:              "127.0.0.1",
 				Port:              "8080",
+				FrontendOrigin:    "https://cortex.example",
 				OpenAIAPIKey:      testAPIKey,
 				LLMModel:          "gpt-4o",
 				LLMUtilityModel:   "gpt-4o-mini",

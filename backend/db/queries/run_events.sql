@@ -15,3 +15,12 @@ RETURNING *;
 SELECT * FROM run_events
 WHERE agent_run_id = $1
 ORDER BY seq;
+
+-- name: ListRunEventsByRunAfterSeq :many
+-- The SSE stream's incremental read: everything the client has not seen yet.
+-- seq > $2 with $2 = 0 is the full transcript, so first attach and resume are
+-- the same query.
+SELECT * FROM run_events
+WHERE agent_run_id = $1
+  AND seq > $2
+ORDER BY seq;

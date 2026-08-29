@@ -96,6 +96,7 @@ type Message struct {
 	Role           string             `json:"role"`
 	Content        string             `json:"content"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	AgentRunID     *uuid.UUID         `json:"agent_run_id"`
 }
 
 type RunEvent struct {

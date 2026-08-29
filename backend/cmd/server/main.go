@@ -237,12 +237,13 @@ func run(logger *slog.Logger) error {
 	}
 
 	handler := api.NewRouter(api.Deps{
-		DB:           pool,
-		Enqueuer:     queue,
-		Model:        cfg.LLMModel,
-		DevUserEmail: devUserEmail,
-		IndexSources: indexer.Sources(),
-		Logger:       logger,
+		DB:             pool,
+		Enqueuer:       queue,
+		Model:          cfg.LLMModel,
+		DevUserEmail:   devUserEmail,
+		IndexSources:   indexer.Sources(),
+		FrontendOrigin: cfg.FrontendOrigin,
+		Logger:         logger,
 	})
 
 	srv := &http.Server{

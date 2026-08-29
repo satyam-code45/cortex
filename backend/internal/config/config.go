@@ -20,6 +20,7 @@ const (
 	// it deliberately.
 	DefaultHost            = "127.0.0.1"
 	DefaultPort            = "8080"
+	DefaultFrontendOrigin  = "http://localhost:3000"
 	DefaultLLMModel        = "gpt-4o"
 	DefaultLLMUtilityModel = "gpt-4o-mini"
 	DefaultEmbeddingModel  = "text-embedding-3-small"
@@ -57,6 +58,10 @@ type Config struct {
 	Host string
 	// Port is the TCP port the HTTP server listens on.
 	Port string
+	// FrontendOrigin is the browser origin allowed by CORS. Exactly one: the
+	// API serves one first-party frontend, and a list would only invite
+	// wildcarding later.
+	FrontendOrigin string
 
 	// OpenAIAPIKey authenticates against the OpenAI API (required).
 	OpenAIAPIKey string
@@ -125,13 +130,13 @@ type Config struct {
 // message. A test that dumped this struct on mismatch is exactly how a real
 // token ends up in captured output.
 func (c Config) String() string {
-	return fmt.Sprintf("Config{DatabaseURL:%s Host:%s Port:%s "+
+	return fmt.Sprintf("Config{DatabaseURL:%s Host:%s Port:%s FrontendOrigin:%s "+
 		"OpenAIAPIKey:%s OpenAIBaseURL:%s LLMModel:%s LLMUtilityModel:%s EmbeddingModel:%s "+
 		"MaxIterations:%d AgentRunWorkers:%d IndexMaxDocuments:%d IndexWorkers:%d "+
 		"JiraBaseURL:%s JiraEmail:%s JiraAPIToken:%s "+
 		"JiraProjects:%s NotionToken:%s NotionParentPageID:%s "+
 		"GmailCredentialsPath:%s GmailTokenPath:%s GmailQueryScope:%s}",
-		redactDSN(c.DatabaseURL), c.Host, c.Port,
+		redactDSN(c.DatabaseURL), c.Host, c.Port, c.FrontendOrigin,
 		redact(c.OpenAIAPIKey), c.OpenAIBaseURL, c.LLMModel, c.LLMUtilityModel, c.EmbeddingModel,
 		c.MaxIterations, c.AgentRunWorkers, c.IndexMaxDocuments, c.IndexWorkers,
 		c.JiraBaseURL, c.JiraEmail, redact(c.JiraAPIToken),
@@ -175,6 +180,7 @@ func Load() (*Config, error) {
 		DatabaseURL:     os.Getenv("DATABASE_URL"),
 		Host:            envOr("HOST", DefaultHost),
 		Port:            envOr("PORT", DefaultPort),
+		FrontendOrigin:  strings.TrimRight(envOr("FRONTEND_ORIGIN", DefaultFrontendOrigin), "/"),
 		OpenAIAPIKey:    os.Getenv("OPENAI_API_KEY"),
 		OpenAIBaseURL:   os.Getenv("OPENAI_BASE_URL"),
 		LLMModel:        envOr("LLM_MODEL", DefaultLLMModel),

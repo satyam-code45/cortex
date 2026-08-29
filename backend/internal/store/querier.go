@@ -44,6 +44,8 @@ type Querier interface {
 	// intact.
 	InsertEvidence(ctx context.Context, arg InsertEvidenceParams) (Evidence, error)
 	InsertLLMCall(ctx context.Context, arg InsertLLMCallParams) (LlmCall, error)
+	// agent_run_id is null for user messages; the orchestrator sets it on the
+	// assistant answer so the frontend can reach the run's trace from the message.
 	InsertMessage(ctx context.Context, arg InsertMessageParams) (Message, error)
 	// The sequence is computed inside the statement rather than tracked by the
 	// caller: a resumed or retried run has no in-process memory of how far the
@@ -69,6 +71,10 @@ type Querier interface {
 	// Ordered by seq, not created_at: two events written inside one transaction can
 	// share a timestamp, and the transcript's order is the thing being replayed.
 	ListRunEventsByRun(ctx context.Context, agentRunID uuid.UUID) ([]RunEvent, error)
+	// The SSE stream's incremental read: everything the client has not seen yet.
+	// seq > $2 with $2 = 0 is the full transcript, so first attach and resume are
+	// the same query.
+	ListRunEventsByRunAfterSeq(ctx context.Context, arg ListRunEventsByRunAfterSeqParams) ([]RunEvent, error)
 	ListToolCallsByRun(ctx context.Context, agentRunID uuid.UUID) ([]ToolCall, error)
 	// The join is the point (idea.md §11): the vector index finds the chunk, and the
 	// relational half supplies the title, URL and metadata that make it citable.

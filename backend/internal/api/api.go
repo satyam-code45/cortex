@@ -61,6 +61,9 @@ type Deps struct {
 	// IndexSources are the source names POST /api/admin/index accepts. Empty
 	// disables the endpoint, which is what a build with no indexer wants.
 	IndexSources []string
+	// FrontendOrigin is the one browser origin CORS admits. Empty sends no
+	// CORS headers at all, which shuts browsers out entirely.
+	FrontendOrigin string
 	// Logger receives request and handler logs.
 	Logger *slog.Logger
 }
@@ -85,9 +88,21 @@ func NewRouter(deps Deps) http.Handler {
 
 	r.Get("/healthz", s.handleHealthz)
 	r.Route("/api", func(r chi.Router) {
+		// Subrouter-level (r.Use) rather than an inline group: preflight
+		// OPTIONS requests match no registered route, and only subrouter
+		// middleware wraps chi's routing itself — group middleware would
+		// never see them. /admin/index is exempted from the grant: the
+		// frontend has no admin UI, so a passing preflight there would only
+		// authorize whatever happens to be served on the allowed origin (any
+		// dev server on port 3000) to queue paid indexing crawls. curl and
+		// make index are unaffected — CORS binds browsers, not clients.
+		r.Use(corsMiddleware(deps.FrontendOrigin, "/api/admin/index"))
 		r.Post("/chat", s.handleChat)
 		r.Get("/runs/{id}", s.handleGetRun)
+		r.Get("/runs/{id}/events", s.handleRunEvents)
 		r.Get("/runs/{id}/trace", s.handleGetRunTrace)
+		r.Get("/conversations", s.handleListConversations)
+		r.Get("/conversations/{id}/messages", s.handleListConversationMessages)
 		r.Post("/admin/index", s.handleAdminIndex)
 	})
 	return r

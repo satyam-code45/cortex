@@ -12,19 +12,27 @@ import (
 )
 
 const insertMessage = `-- name: InsertMessage :one
-INSERT INTO messages (conversation_id, role, content)
-VALUES ($1, $2, $3)
-RETURNING id, conversation_id, role, content, created_at
+INSERT INTO messages (conversation_id, role, content, agent_run_id)
+VALUES ($1, $2, $3, $4)
+RETURNING id, conversation_id, role, content, created_at, agent_run_id
 `
 
 type InsertMessageParams struct {
-	ConversationID uuid.UUID `json:"conversation_id"`
-	Role           string    `json:"role"`
-	Content        string    `json:"content"`
+	ConversationID uuid.UUID  `json:"conversation_id"`
+	Role           string     `json:"role"`
+	Content        string     `json:"content"`
+	AgentRunID     *uuid.UUID `json:"agent_run_id"`
 }
 
+// agent_run_id is null for user messages; the orchestrator sets it on the
+// assistant answer so the frontend can reach the run's trace from the message.
 func (q *Queries) InsertMessage(ctx context.Context, arg InsertMessageParams) (Message, error) {
-	row := q.db.QueryRow(ctx, insertMessage, arg.ConversationID, arg.Role, arg.Content)
+	row := q.db.QueryRow(ctx, insertMessage,
+		arg.ConversationID,
+		arg.Role,
+		arg.Content,
+		arg.AgentRunID,
+	)
 	var i Message
 	err := row.Scan(
 		&i.ID,
@@ -32,12 +40,13 @@ func (q *Queries) InsertMessage(ctx context.Context, arg InsertMessageParams) (M
 		&i.Role,
 		&i.Content,
 		&i.CreatedAt,
+		&i.AgentRunID,
 	)
 	return i, err
 }
 
 const listMessagesByConversation = `-- name: ListMessagesByConversation :many
-SELECT id, conversation_id, role, content, created_at FROM messages
+SELECT id, conversation_id, role, content, created_at, agent_run_id FROM messages
 WHERE conversation_id = $1
 ORDER BY created_at, id
 `
@@ -57,6 +66,7 @@ func (q *Queries) ListMessagesByConversation(ctx context.Context, conversationID
 			&i.Role,
 			&i.Content,
 			&i.CreatedAt,
+			&i.AgentRunID,
 		); err != nil {
 			return nil, err
 		}

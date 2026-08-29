@@ -961,6 +961,10 @@ func (o *Orchestrator) complete(ctx context.Context, state *runState, cited cita
 			ConversationID: state.conversationID,
 			Role:           string(llm.RoleAssistant),
 			Content:        answer,
+			// The message→run link is what lets the frontend resolve this
+			// answer's [n] markers through the run's trace after the SSE
+			// stream is long gone.
+			AgentRunID: &state.runID,
 		}); err != nil {
 			return fmt.Errorf("insert assistant message: %w", err)
 		}

@@ -47,6 +47,65 @@ func hostCheck(logger *slog.Logger) func(http.Handler) http.Handler {
 	}
 }
 
+// corsMiddleware allows the one configured frontend origin to call the API
+// from a browser. Requests whose path is in exemptPaths never receive the
+// grant — their preflights are answered 204 with no allow headers, which a
+// browser treats as refusal.
+//
+// Hand-rolled rather than a dependency because the policy is a single exact
+// origin: no wildcards, no credentials, no per-route variation beyond the
+// exemption list. Everything a CORS library is for — origin lists, regexes,
+// reflecting request headers — is exactly what this API must not do.
+//
+// The header is set on GETs too, not just preflighted POSTs: EventSource does
+// not preflight its first connect, but the browser still refuses to deliver
+// the stream unless the response itself carries Access-Control-Allow-Origin.
+func corsMiddleware(allowedOrigin string, exemptPaths ...string) func(http.Handler) http.Handler {
+	exempt := make(map[string]struct{}, len(exemptPaths))
+	for _, p := range exemptPaths {
+		exempt[p] = struct{}{}
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Vary unconditionally: whether the CORS headers appear depends on
+			// the request Origin, so a cache must not serve one origin's
+			// response to another.
+			w.Header().Add("Vary", "Origin")
+
+			_, isExempt := exempt[r.URL.Path]
+
+			// The empty check keeps FrontendOrigin="" meaning "no CORS at
+			// all": without it, a request with no Origin header would match
+			// "" == "" and pick up empty-valued allow headers.
+			if !isExempt && allowedOrigin != "" && r.Header.Get("Origin") == allowedOrigin {
+				h := w.Header()
+				h.Set("Access-Control-Allow-Origin", allowedOrigin)
+				h.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+				// Last-Event-ID is not CORS-safelisted, and EventSource sends
+				// it when it reconnects — only the FIRST connect skips the
+				// preflight. Without it here, a dropped SSE connection
+				// mid-run could never resume cross-origin: the reconnect's
+				// preflight would fail and EventSource gives up for good.
+				h.Set("Access-Control-Allow-Headers", "Content-Type, Last-Event-ID")
+				// 10 minutes: long enough that the preflight is not paid on
+				// every POST, short enough that a policy change lands the same
+				// day it ships.
+				h.Set("Access-Control-Max-Age", "600")
+			}
+
+			// Preflights end here for every origin. Answering 204 without the
+			// allow headers is the standard way to refuse one: the browser
+			// fails the actual request, and the handler never runs.
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // requestLogger logs one line per request once it completes, including the
 // status, byte count, and duration. It relies on chi's WrapResponseWriter to
 // observe the status the handler wrote.

@@ -77,3 +77,45 @@ func (q *Queries) ListRunEventsByRun(ctx context.Context, agentRunID uuid.UUID) 
 	}
 	return items, nil
 }
+
+const listRunEventsByRunAfterSeq = `-- name: ListRunEventsByRunAfterSeq :many
+SELECT id, agent_run_id, seq, type, payload, created_at FROM run_events
+WHERE agent_run_id = $1
+  AND seq > $2
+ORDER BY seq
+`
+
+type ListRunEventsByRunAfterSeqParams struct {
+	AgentRunID uuid.UUID `json:"agent_run_id"`
+	Seq        int32     `json:"seq"`
+}
+
+// The SSE stream's incremental read: everything the client has not seen yet.
+// seq > $2 with $2 = 0 is the full transcript, so first attach and resume are
+// the same query.
+func (q *Queries) ListRunEventsByRunAfterSeq(ctx context.Context, arg ListRunEventsByRunAfterSeqParams) ([]RunEvent, error) {
+	rows, err := q.db.Query(ctx, listRunEventsByRunAfterSeq, arg.AgentRunID, arg.Seq)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RunEvent{}
+	for rows.Next() {
+		var i RunEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentRunID,
+			&i.Seq,
+			&i.Type,
+			&i.Payload,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
