@@ -3,6 +3,8 @@
 
 import type {
   ChatResponse,
+  ConnectionsInfo,
+  ConnectionSourceStatus,
   Conversation,
   DocumentDetail,
   DocumentsQuery,
@@ -12,6 +14,7 @@ import type {
   Message,
   RefreshResponse,
   RunResponse,
+  SourceName,
   Trace,
 } from "./types";
 
@@ -187,6 +190,62 @@ export function putLLMKey(provider: string, key: string): Promise<LLMKeyInfo> {
 // DELETE /api/settings/llm-key — removes the stored key.
 export function deleteLLMKey(): Promise<void> {
   return request<void>("/api/settings/llm-key", { method: "DELETE" });
+}
+
+// GET /api/connections — mode, demo toggle, and per-source connection status.
+export function getConnections(): Promise<ConnectionsInfo> {
+  return request<ConnectionsInfo>("/api/connections");
+}
+
+// PUT /api/connections/jira — validates the pasted token live against the
+// user's own Jira site, then stores it encrypted. A 422 carries Atlassian's
+// reason.
+export function putJiraConnection(
+  baseUrl: string,
+  email: string,
+  apiToken: string,
+): Promise<ConnectionSourceStatus> {
+  return request<ConnectionSourceStatus>("/api/connections/jira", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ base_url: baseUrl, email, api_token: apiToken }),
+  });
+}
+
+// PUT /api/connections/notion — validates the pasted integration token live,
+// then stores it encrypted. A 422 carries Notion's reason.
+export function putNotionConnection(
+  token: string,
+): Promise<ConnectionSourceStatus> {
+  return request<ConnectionSourceStatus>("/api/connections/notion", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+}
+
+// DELETE /api/connections/{source} — disconnects one source.
+export function deleteConnection(source: SourceName): Promise<void> {
+  return request<void>(`/api/connections/${source}`, { method: "DELETE" });
+}
+
+// PUT /api/connections/mode — flips the "Use demo workspace" toggle; returns
+// the fresh overview.
+export function putConnectionsMode(
+  useDemoWorkspace: boolean,
+): Promise<ConnectionsInfo> {
+  return request<ConnectionsInfo>("/api/connections/mode", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ use_demo_workspace: useDemoWorkspace }),
+  });
+}
+
+// URL the "Connect Gmail" button navigates to (a top-level redirect, like
+// googleLoginUrl — the flow goes through Google's consent screen and comes
+// back to /connections).
+export function gmailConnectUrl(): string {
+  return `${API_URL}/api/connections/gmail/connect`;
 }
 
 // GET /api/documents — the Sources listing with counts and freshness stamps.

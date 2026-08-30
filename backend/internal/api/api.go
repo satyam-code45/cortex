@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"cortex/internal/auth"
+	"cortex/internal/connections"
 	"cortex/internal/keys"
 	"cortex/internal/store"
 )
@@ -95,6 +96,19 @@ type Deps struct {
 	// OpenAIBaseURL overrides the endpoint key validation calls; tests point
 	// it at an httptest server.
 	OpenAIBaseURL string
+
+	// Connections stores and reports users' source connections (Day 8).
+	Connections *connections.Service
+	// NotionBaseURL overrides the endpoint Notion token validation calls;
+	// tests point it at an httptest server. (Jira needs no equivalent — the
+	// user supplies their site URL, so tests just paste a fake server's.)
+	NotionBaseURL string
+	// ConnectRedirectURI is where Google sends the browser after Gmail
+	// consent — must be registered on the Web OAuth client.
+	ConnectRedirectURI string
+	// GmailBaseURL overrides the Gmail API root for the connect flow's
+	// mailbox validation; tests point it at an httptest server.
+	GmailBaseURL string
 }
 
 // Server holds the handler dependencies.
@@ -142,6 +156,13 @@ func NewRouter(deps Deps) http.Handler {
 		r.Get("/settings/llm-key", s.handleGetLLMKey)
 		r.Put("/settings/llm-key", s.handlePutLLMKey)
 		r.Delete("/settings/llm-key", s.handleDeleteLLMKey)
+		r.Get("/connections", s.handleGetConnections)
+		r.Put("/connections/jira", s.handlePutJiraConnection)
+		r.Put("/connections/notion", s.handlePutNotionConnection)
+		r.Put("/connections/mode", s.handlePutConnectionsMode)
+		r.Delete("/connections/{source}", s.handleDeleteConnection)
+		r.Get("/connections/gmail/connect", s.handleGmailConnect)
+		r.Get("/connections/gmail/callback", s.handleGmailCallback)
 		r.Get("/documents", s.handleListDocuments)
 		r.Get("/documents/{id}", s.handleGetDocument)
 		r.Post("/documents/refresh", s.handleRefreshDocuments)

@@ -16,7 +16,7 @@ ON CONFLICT (email) DO UPDATE
     SET google_sub = EXCLUDED.google_sub,
         name       = EXCLUDED.name,
         avatar_url = EXCLUDED.avatar_url
-RETURNING id, email, created_at, name, avatar_url, google_sub
+RETURNING id, email, created_at, name, avatar_url, google_sub, use_demo_workspace
 `
 
 type UpsertGoogleUserParams struct {
@@ -43,6 +43,7 @@ func (q *Queries) UpsertGoogleUser(ctx context.Context, arg UpsertGoogleUserPara
 		&i.Name,
 		&i.AvatarUrl,
 		&i.GoogleSub,
+		&i.UseDemoWorkspace,
 	)
 	return i, err
 }
@@ -51,7 +52,7 @@ const upsertUser = `-- name: UpsertUser :one
 INSERT INTO users (email)
 VALUES ($1)
 ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
-RETURNING id, email, created_at, name, avatar_url, google_sub
+RETURNING id, email, created_at, name, avatar_url, google_sub, use_demo_workspace
 `
 
 // Idempotent by email: returns the existing row when the user already exists.
@@ -65,6 +66,7 @@ func (q *Queries) UpsertUser(ctx context.Context, email string) (User, error) {
 		&i.Name,
 		&i.AvatarUrl,
 		&i.GoogleSub,
+		&i.UseDemoWorkspace,
 	)
 	return i, err
 }

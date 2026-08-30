@@ -141,12 +141,12 @@ func (d *stubDB) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 var stubUserID = uuid.MustParse("00000000-0000-0000-0000-00000000d0d0")
 
 // userRow satisfies the UpsertUser scan (id, email, created_at, name,
-// avatar_url, google_sub).
+// avatar_url, google_sub, use_demo_workspace).
 type userRow struct{ email string }
 
 func (r userRow) Scan(dest ...any) error {
-	if len(dest) != 6 {
-		return fmt.Errorf("userRow: %d scan destinations, want 6", len(dest))
+	if len(dest) != 7 {
+		return fmt.Errorf("userRow: %d scan destinations, want 7", len(dest))
 	}
 	*(dest[0].(*uuid.UUID)) = stubUserID
 	*(dest[1].(*string)) = r.email
@@ -154,6 +154,7 @@ func (r userRow) Scan(dest ...any) error {
 	*(dest[3].(**string)) = nil
 	*(dest[4].(**string)) = nil
 	*(dest[5].(**string)) = nil
+	*(dest[6].(*bool)) = false
 	return nil
 }
 

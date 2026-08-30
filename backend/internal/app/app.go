@@ -23,6 +23,7 @@ import (
 
 	"cortex/internal/agent"
 	"cortex/internal/config"
+	"cortex/internal/connections"
 	"cortex/internal/keys"
 	"cortex/internal/llm"
 	"cortex/internal/rag"
@@ -37,10 +38,12 @@ const dbConnectTimeout = 10 * time.Second
 
 // Options selects per-command behavior of the shared graph.
 type Options struct {
-	// BYOK makes the orchestrator run each investigation on its owner's
-	// stored LLM key (cmd/server). Off — cmd/eval — every run uses the
-	// server's key: the eval is a server-initiated operation and must never
-	// borrow a user's key, in either direction.
+	// BYOK makes the orchestrator run each investigation as its owner
+	// (cmd/server): on the owner's stored LLM key, and against the owner's
+	// connected sources (Day 8) — or the full demo workspace when they have
+	// none. Off — cmd/eval — every run uses the server's key and the full
+	// demo registry: the eval is a server-initiated operation and must never
+	// borrow a user's key or credentials, in either direction.
 	BYOK bool
 }
 
@@ -49,6 +52,7 @@ type Deps struct {
 	Pool         *pgxpool.Pool
 	Provider     llm.Provider
 	Keys         *keys.Service
+	Connections  *connections.Service
 	JiraClient   *jira.Client
 	NotionClient *notion.Client
 	GmailClient  *gmail.Client
@@ -173,6 +177,7 @@ func build(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, logger *
 		return nil, err
 	}
 	keyService := keys.NewService(pool, cipher)
+	connectionService := connections.NewService(pool, cipher)
 
 	agentConfig := agent.Config{
 		DB:                 pool,
@@ -212,6 +217,22 @@ func build(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, logger *
 				EmbeddingModel: cfg.EmbeddingModel,
 			}), nil
 		}
+
+		// The same cut for tools (REQ-8.4): each run's registry is built from
+		// its owner's source connections — all demo or all theirs, never
+		// mixed. The demo registry instance is shared so its per-upstream
+		// pacing state stays shared across demo-mode runs.
+		builder, err := connections.NewRegistryBuilder(connections.RegistryBuilderConfig{
+			Service:            connectionService,
+			Demo:               registry,
+			GoogleClientID:     cfg.GoogleOAuthClientID,
+			GoogleClientSecret: cfg.GoogleOAuthClientSecret,
+			Logger:             logger,
+		})
+		if err != nil {
+			return nil, err
+		}
+		agentConfig.RegistryForUser = builder.ForUser
 	}
 	orchestrator, err := agent.New(agentConfig)
 	if err != nil {
@@ -222,6 +243,7 @@ func build(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, logger *
 		Pool:         pool,
 		Provider:     provider,
 		Keys:         keyService,
+		Connections:  connectionService,
 		JiraClient:   jiraClient,
 		NotionClient: notionClient,
 		GmailClient:  gmailClient,

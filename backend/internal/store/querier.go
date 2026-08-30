@@ -30,6 +30,7 @@ type Querier interface {
 	// Opportunistic housekeeping, called on login; there is no background sweeper.
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
 	DeleteSessionByTokenHash(ctx context.Context, tokenHash []byte) (int64, error)
+	DeleteUserConnection(ctx context.Context, arg DeleteUserConnectionParams) (int64, error)
 	DeleteUserLLMKey(ctx context.Context, userID uuid.UUID) (int64, error)
 	FailAgentRun(ctx context.Context, arg FailAgentRunParams) (AgentRun, error)
 	// Ownership is enforced in the query, not in Go: GET /api/runs/{id} takes a
@@ -48,6 +49,8 @@ type Querier interface {
 	// Expiry is enforced here, not in Go, so a revoked-or-expired session and an
 	// unknown token are indistinguishable to the caller (both are no-rows).
 	GetSessionUserByTokenHash(ctx context.Context, tokenHash []byte) (GetSessionUserByTokenHashRow, error)
+	GetUserConnection(ctx context.Context, arg GetUserConnectionParams) (UserConnection, error)
+	GetUserDemoWorkspace(ctx context.Context, id uuid.UUID) (bool, error)
 	GetUserLLMKey(ctx context.Context, userID uuid.UUID) (UserLlmKey, error)
 	InsertAgentRun(ctx context.Context, arg InsertAgentRunParams) (AgentRun, error)
 	InsertCitation(ctx context.Context, arg InsertCitationParams) (Citation, error)
@@ -103,6 +106,7 @@ type Querier interface {
 	// the same query.
 	ListRunEventsByRunAfterSeq(ctx context.Context, arg ListRunEventsByRunAfterSeqParams) ([]RunEvent, error)
 	ListToolCallsByRun(ctx context.Context, agentRunID uuid.UUID) ([]ToolCall, error)
+	ListUserConnections(ctx context.Context, userID uuid.UUID) ([]UserConnection, error)
 	// The join is the point (idea.md §11): the vector index finds the chunk, and the
 	// relational half supplies the title, URL and metadata that make it citable.
 	// Doing both in one query is only possible because the vectors live in the same
@@ -112,6 +116,8 @@ type Querier interface {
 	// ordering is ascending. The operator must match the index's vector_cosine_ops
 	// or the planner silently ignores the index.
 	SearchDocumentChunks(ctx context.Context, arg SearchDocumentChunksParams) ([]SearchDocumentChunksRow, error)
+	SetUserConnectionError(ctx context.Context, arg SetUserConnectionErrorParams) error
+	SetUserDemoWorkspace(ctx context.Context, arg SetUserDemoWorkspaceParams) error
 	// Last content change per source (updated_at only moves when content_hash
 	// changes) — distinct from "last refreshed", which comes from River job rows.
 	SourceLastIndexed(ctx context.Context) ([]SourceLastIndexedRow, error)
@@ -131,6 +137,9 @@ type Querier interface {
 	UpsertGoogleUser(ctx context.Context, arg UpsertGoogleUserParams) (User, error)
 	// Idempotent by email: returns the existing row when the user already exists.
 	UpsertUser(ctx context.Context, email string) (User, error)
+	// One connection per (user, source): reconnecting replaces the credential and
+	// clears any error state in the same write.
+	UpsertUserConnection(ctx context.Context, arg UpsertUserConnectionParams) (UserConnection, error)
 	// One key per user: replacing the key or switching provider is the same write.
 	UpsertUserLLMKey(ctx context.Context, arg UpsertUserLLMKeyParams) (UserLlmKey, error)
 }

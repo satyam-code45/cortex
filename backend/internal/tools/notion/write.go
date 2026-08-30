@@ -174,6 +174,30 @@ func (c *Client) PageTitle(ctx context.Context, pageID string) (string, error) {
 	return p.title(), nil
 }
 
+// Bot describes the integration a token authenticates as. WorkspaceName may
+// be empty — Notion only reports it for workspace-owned integrations.
+type Bot struct {
+	Name          string
+	WorkspaceName string
+}
+
+// CurrentBot returns the integration the token authenticates as, via
+// GET /v1/users/me. It doubles as the live credential check for the
+// paste-a-key connection flow (Day 8): a bad token surfaces here as an
+// APIError before anything is stored.
+func (c *Client) CurrentBot(ctx context.Context) (Bot, error) {
+	var me struct {
+		Name string `json:"name"`
+		Bot  struct {
+			WorkspaceName string `json:"workspace_name"`
+		} `json:"bot"`
+	}
+	if err := c.get(ctx, "/v1/users/me", nil, &me); err != nil {
+		return Bot{}, fmt.Errorf("get current bot: %w", err)
+	}
+	return Bot{Name: me.Name, WorkspaceName: me.Bot.WorkspaceName}, nil
+}
+
 // SharedPage is one page the integration can see.
 type SharedPage struct {
 	ID    string

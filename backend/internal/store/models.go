@@ -139,12 +139,25 @@ type ToolCall struct {
 }
 
 type User struct {
-	ID        uuid.UUID          `json:"id"`
-	Email     string             `json:"email"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	Name      *string            `json:"name"`
-	AvatarUrl *string            `json:"avatar_url"`
-	GoogleSub *string            `json:"google_sub"`
+	ID               uuid.UUID          `json:"id"`
+	Email            string             `json:"email"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	Name             *string            `json:"name"`
+	AvatarUrl        *string            `json:"avatar_url"`
+	GoogleSub        *string            `json:"google_sub"`
+	UseDemoWorkspace bool               `json:"use_demo_workspace"`
+}
+
+type UserConnection struct {
+	ID                    uuid.UUID          `json:"id"`
+	UserID                uuid.UUID          `json:"user_id"`
+	Source                string             `json:"source"`
+	CredentialsCiphertext []byte             `json:"credentials_ciphertext"`
+	Identity              []byte             `json:"identity"`
+	Status                string             `json:"status"`
+	LastError             *string            `json:"last_error"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 }
 
 type UserLlmKey struct {

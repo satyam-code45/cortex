@@ -68,7 +68,9 @@ seed-gmail: ## Gmail only (~16 backdated fixture emails); needs `make gmail-auth
 
 # One-time, and interactive: the OAuth consent screen needs a human at a browser.
 # It leaves .gmail-token.json behind, which the server and the seeder then read.
-gmail-auth: ## authorize Gmail once and cache the refresh token
+# Dev-only since Day 8: this authorizes the DEMO workspace mailbox. Users
+# connect their own Gmail with the button on the Connections page.
+gmail-auth: ## authorize the demo-workspace Gmail once and cache the refresh token (dev-only)
 	cd backend && go run ./cmd/gmail-auth
 
 # EVAL_FLAGS passes through to the runner, e.g.

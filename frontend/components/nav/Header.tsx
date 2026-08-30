@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 const navItems = [
   { href: "/", label: "Chat" },
   { href: "/sources", label: "Sources" },
+  { href: "/connections", label: "Connections" },
 ];
 
 export function Header({ me }: { me: Me | null }) {

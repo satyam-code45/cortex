@@ -140,6 +140,18 @@ type Config struct {
 	// Provider.
 	ProviderForUser func(ctx context.Context, userID uuid.UUID) (llm.Provider, error)
 
+	// RegistryForUser, when set, supplies each run's tool registry from its
+	// owner's source connections (REQ-8.4) — decrypt, construct clients,
+	// discard. Demo mode is all-or-nothing: the factory returns either the
+	// full demo registry or ONLY the owner's connected sources, never a mix.
+	// An error wrapping ErrNoUsableSources fails the run through the normal
+	// fail path (every connection errored; retrying will not heal it) — the
+	// factory still returns an honest empty registry and sources map alongside
+	// it so the failed run's trace records what was attempted. Any other error
+	// is transient and returned to River for a retry. Nil — cmd/eval, tests —
+	// means every run uses Registry.
+	RegistryForUser func(ctx context.Context, userID uuid.UUID) (*tools.Registry, Sources, error)
+
 	// Model is the reasoning model driving the loop.
 	Model string
 	// UtilityModel is the cheaper model used to summarize oversized results.
@@ -157,11 +169,26 @@ type Config struct {
 	Now func() time.Time
 }
 
+// Sources reports which workspace a run's tools reach: the shared demo
+// workspace, or the sources the run's owner connected. It is recorded on
+// run_started so a trace is honest about what it searched.
+type Sources struct {
+	Mode      string   // ModeDemo or ModeUser
+	Connected []string // sorted source names; empty in demo mode
+}
+
+// Workspace modes for Sources.Mode.
+const (
+	ModeDemo = "demo"
+	ModeUser = "user"
+)
+
 // Orchestrator runs agent loops.
 type Orchestrator struct {
 	db              DB
 	provider        llm.Provider
 	providerForUser func(ctx context.Context, userID uuid.UUID) (llm.Provider, error)
+	registryForUser func(ctx context.Context, userID uuid.UUID) (*tools.Registry, Sources, error)
 	registry        *tools.Registry
 
 	model        string
@@ -195,6 +222,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		db:                  cfg.DB,
 		provider:            cfg.Provider,
 		providerForUser:     cfg.ProviderForUser,
+		registryForUser:     cfg.RegistryForUser,
 		registry:            cfg.Registry,
 		model:               cfg.Model,
 		utilityModel:        cfg.UtilityModel,
@@ -239,7 +267,12 @@ type runState struct {
 	// provider makes this run's completion calls: the owner's own (BYOK) or
 	// the orchestrator-wide one (eval, tests).
 	provider llm.Provider
-	started  time.Time
+	// registry is this run's tool set: the full demo registry, or clients
+	// built from the owner's connected sources (REQ-8.4) — never a mix.
+	registry *tools.Registry
+	// sources records which workspace registry reaches, for run_started.
+	sources Sources
+	started time.Time
 
 	// messages is the transcript as the model sees it.
 	messages []llm.Message
@@ -307,13 +340,65 @@ type cachedResult struct {
 // database as 'failed' and returns nil, because retrying the River job would
 // not help and would spend money again.
 func (o *Orchestrator) Run(ctx context.Context, runID uuid.UUID) error {
-	state, ok, err := o.begin(ctx, runID)
+	// The owner is resolved before the claim: both per-run factories need it,
+	// and the registry in particular must exist before begin() — run_started
+	// is emitted inside the claim transaction and records the run's actual
+	// system prompt, tool names, and sources map. The read is of immutable
+	// rows (the run and its conversation were inserted together at enqueue),
+	// so doing it outside the claim loses nothing.
+	var ownerID uuid.UUID
+	err := o.withTx(ctx, func(q store.Querier) error {
+		owner, err := q.GetAgentRunOwner(ctx, runID)
+		if err != nil {
+			return fmt.Errorf("resolve run owner: %w", err)
+		}
+		ownerID = owner
+		return nil
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The run row is gone (an orphaned job — a dev reseed truncating users
+		// cascades to agent_runs but leaves queue rows behind). Retrying can
+		// never help, so skip the job like the claim guard does rather than
+		// burning River's whole attempt budget on it.
+		o.logger.Warn("agent: run no longer exists, skipping", "run_id", runID)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("resolve owner for run %s: %w", runID, err)
+	}
+
+	// Resolve the run's tool registry from the owner's connections. A
+	// permanent failure (every connection errored — ErrNoUsableSources) still
+	// claims the run below and fails it honestly: the factory has already
+	// marked the broken connections, and demo data must never stand in for a
+	// user's real sources. Any other error is transient (a database blip, a
+	// provider hiccup during the eager credential check) and goes back to
+	// River for a retry.
+	registry, sources := o.registry, Sources{Mode: ModeDemo}
+	var noSourcesErr error
+	if o.registryForUser != nil {
+		reg, src, err := o.registryForUser(ctx, ownerID)
+		if err != nil && !errors.Is(err, ErrNoUsableSources) {
+			return fmt.Errorf("resolve tool registry for run %s: %w", runID, err)
+		}
+		registry, sources, noSourcesErr = reg, src, err
+	}
+
+	state, ok, err := o.begin(ctx, runID, ownerID, registry, sources)
 	if err != nil {
 		return err
 	}
 	if !ok {
 		// Already in a terminal state: a retried job, or a duplicate enqueue.
 		o.logger.Info("agent: run already finished, skipping", "run_id", runID)
+		return nil
+	}
+
+	if noSourcesErr != nil {
+		o.logger.Error("agent: run has no usable sources", "run_id", runID, "error", noSourcesErr)
+		if failErr := o.fail(ctx, state, "your connected sources need attention — reconnect them on the Connections page"); failErr != nil {
+			return fmt.Errorf("record failed run %s: %w", runID, failErr)
+		}
 		return nil
 	}
 
@@ -376,6 +461,13 @@ func (o *Orchestrator) Run(ctx context.Context, runID uuid.UUID) error {
 // fails the run instead of letting River retry it.
 var ErrLLMKeyUnavailable = errors.New("agent: llm key unavailable")
 
+// ErrNoUsableSources marks a RegistryForUser result with zero usable tools: the
+// owner has connections (so demo mode must not apply) but every one of them is
+// errored or undecryptable. It will not heal on retry — the user must
+// reconnect — so the orchestrator fails the run with a safe reason instead of
+// letting River retry it.
+var ErrNoUsableSources = errors.New("agent: no usable sources")
+
 // providerError marks an error as having come from the LLM provider, so it is
 // classified through llm.SafeErrorMessage (which strips the request URL and the
 // upstream response body) rather than reported verbatim.
@@ -403,10 +495,16 @@ func safeReason(err error) string {
 // begin claims the run, loads its conversation, and opens the transcript.
 //
 // The claim, the history read, and the run_started event share one transaction
-// so that a run is either fully started or not started at all.
-func (o *Orchestrator) begin(ctx context.Context, runID uuid.UUID) (*runState, bool, error) {
+// so that a run is either fully started or not started at all. The owner and
+// the per-run registry are resolved by the caller before the claim — the
+// registry construction can involve a credential round trip that has no
+// business inside a held transaction.
+func (o *Orchestrator) begin(ctx context.Context, runID, ownerID uuid.UUID, registry *tools.Registry, sources Sources) (*runState, bool, error) {
 	state := &runState{
 		runID:     runID,
+		ownerID:   ownerID,
+		registry:  registry,
+		sources:   sources,
 		started:   o.now(),
 		cache:     make(map[string]cachedResult),
 		compacted: make(map[string]bool),
@@ -424,12 +522,6 @@ func (o *Orchestrator) begin(ctx context.Context, runID uuid.UUID) (*runState, b
 		}
 		state.conversationID = run.ConversationID
 
-		owner, err := q.GetAgentRunOwner(ctx, runID)
-		if err != nil {
-			return fmt.Errorf("resolve run owner: %w", err)
-		}
-		state.ownerID = owner
-
 		history, err := q.ListMessagesByConversation(ctx, run.ConversationID)
 		if err != nil {
 			return fmt.Errorf("list conversation messages: %w", err)
@@ -443,7 +535,7 @@ func (o *Orchestrator) begin(ctx context.Context, runID uuid.UUID) (*runState, b
 			recorded = append(recorded, eventMessage{Role: m.Role, Content: m.Content})
 		}
 
-		state.system = buildSystemPrompt(o.now().UTC().Format("2006-01-02"), o.registry.Names())
+		state.system = buildSystemPrompt(o.now().UTC().Format("2006-01-02"), state.registry.Names(), state.sources)
 
 		return appendEvent(ctx, q, runID, EventRunStarted, runStartedPayload{
 			ConversationID: run.ConversationID,
@@ -451,8 +543,12 @@ func (o *Orchestrator) begin(ctx context.Context, runID uuid.UUID) (*runState, b
 			Model:          o.model,
 			MaxIterations:  o.maxIterations,
 			SystemPrompt:   state.system,
-			Tools:          o.registry.Names(),
-			History:        recorded,
+			Tools:          state.registry.Names(),
+			Sources: sourcesPayload{
+				Mode:      state.sources.Mode,
+				Connected: connectedOrEmpty(state.sources.Connected),
+			},
+			History: recorded,
 		})
 	})
 	if err != nil {
@@ -466,7 +562,7 @@ func (o *Orchestrator) begin(ctx context.Context, runID uuid.UUID) (*runState, b
 // It returns the answer and whether that answer was forced by the iteration cap
 // rather than volunteered by the model.
 func (o *Orchestrator) investigate(ctx context.Context, state *runState) (answer string, forced bool, err error) {
-	definitions := o.registry.Definitions()
+	definitions := state.registry.Definitions()
 
 	// pending carries a turn to inject on the next generation. It is threaded
 	// through the loop rather than appended directly so that generate() stays the
@@ -856,7 +952,7 @@ func (o *Orchestrator) recordLLMCall(
 func (o *Orchestrator) runTool(ctx context.Context, state *runState, iteration int, call llm.ToolCall) (string, error) {
 	start := o.now()
 
-	tool, found := o.registry.Get(call.Name)
+	tool, found := state.registry.Get(call.Name)
 
 	canonical, canonicalErr := tools.CanonicalJSON(call.Arguments)
 	if err := o.withTx(ctx, func(q store.Querier) error {
@@ -908,7 +1004,7 @@ func (o *Orchestrator) runTool(ctx context.Context, state *runState, iteration i
 		// A hallucinated tool name. Listing the real ones turns a dead end into
 		// a correctable mistake.
 		return finish(fmt.Sprintf("Error: no tool named %q exists. Available tools: %s.",
-			call.Name, strings.Join(o.registry.Names(), ", ")), "error", "unknown tool", toolOutcome{})
+			call.Name, strings.Join(state.registry.Names(), ", ")), "error", "unknown tool", toolOutcome{})
 	}
 
 	if canonicalErr != nil {

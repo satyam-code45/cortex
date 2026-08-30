@@ -81,8 +81,9 @@ func NewSearchTool(cfg SearchConfig) (tools.Tool, error) {
 func (t *searchTool) Name() string { return toolName }
 
 func (t *searchTool) Description() string {
-	return "Semantic search over the indexed archive of Jira issues and their comments, Notion pages, " +
-		"and email. Use it when you do not know which document holds what you need, when a keyword " +
+	return "Semantic search over the indexed archive of the demo workspace's Jira issues and their " +
+		"comments, Notion pages, and email — it does not index user-connected sources. " +
+		"Use it when you do not know which document holds what you need, when a keyword " +
 		"search has come back empty, or when the question is about what was written, argued or " +
 		"decided rather than about current state. It matches meaning, not exact words, so ask it in " +
 		"the words of the question. The index is a snapshot: never use it for a status, an assignee, " +

@@ -16,6 +16,10 @@ const (
 	// StateCookieName carries the OAuth state and PKCE verifier between the
 	// login redirect and the callback, as "state.verifier".
 	StateCookieName = "cortex_oauth_state"
+	// ConnectStateCookieName is the same for the Gmail connect flow (Day 8),
+	// as "state.verifier" — no nonce, the flow issues no ID token. A distinct
+	// name and path keep a concurrent login flow's cookie from colliding.
+	ConnectStateCookieName = "cortex_connect_state"
 )
 
 // NewSessionToken generates a session token and its storage hash. The token

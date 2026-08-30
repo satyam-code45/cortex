@@ -141,6 +141,8 @@ func run(logger *slog.Logger) error {
 			RedirectURI: "http://localhost:" + cfg.Port + "/api/auth/google/callback",
 		},
 		Keys:                 deps.Keys,
+		Connections:          deps.Connections,
+		ConnectRedirectURI:   "http://localhost:" + cfg.Port + "/api/connections/gmail/callback",
 		APIToken:             cfg.AuthAPIToken,
 		BearerEmail:          cfg.DevUserEmail,
 		AllowedEmails:        lowered(cfg.AuthAllowedEmails),

@@ -42,13 +42,19 @@ type Config struct {
 	// TokenSource supplies access tokens, refreshing as needed.
 	TokenSource *TokenSource
 
-	// QueryScope is ANDed into every search (required).
+	// QueryScope is ANDed into every search (required unless AllowUnscoped).
 	//
 	// Cortex reads a real mailbox, and since sign-in opened (Day 7) any Google
 	// account can drive the agent — so the pin to a label (e.g.
 	// `label:vantage-labs`) is a structural property of the client, not a
 	// configuration suggestion: NewClient refuses to construct without it.
 	QueryScope string
+
+	// AllowUnscoped permits an empty QueryScope: the mailbox is the connected
+	// user's own (Day 8), so there is nothing to confine the search to. The
+	// demo-workspace client must never set this — the scope pin is what keeps
+	// the shared demo mailbox from being read wholesale.
+	AllowUnscoped bool
 
 	// HTTPClient is optional; a timeout-bearing client is built when nil.
 	HTTPClient *http.Client
@@ -80,8 +86,12 @@ func NewClient(cfg Config) (*Client, error) {
 	if cfg.TokenSource == nil {
 		return nil, errors.New("gmail: TokenSource is required")
 	}
-	if strings.TrimSpace(cfg.QueryScope) == "" {
+	scoped := strings.TrimSpace(cfg.QueryScope) != ""
+	if !scoped && !cfg.AllowUnscoped {
 		return nil, errors.New("gmail: QueryScope is required — an unscoped client could search the whole mailbox")
+	}
+	if scoped && cfg.AllowUnscoped {
+		return nil, errors.New("gmail: AllowUnscoped contradicts a non-empty QueryScope — pick one")
 	}
 
 	base := cfg.BaseURL

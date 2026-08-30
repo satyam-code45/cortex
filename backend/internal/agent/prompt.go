@@ -5,13 +5,16 @@ import (
 	"strings"
 )
 
-// systemPrompt is the investigator persona.
-//
-// It is a constant rather than a template because it is also *evidence*: the
-// run_started event stores the exact prompt a run used, so a trace replayed
-// after this text changes still shows what the model was actually told. Editing
-// this changes future runs only.
-const systemPrompt = `You are Cortex, an investigative analyst for an engineering organization.
+// The system prompt is assembled from named constant fragments so a run in
+// user mode (Day 8: per-user source connections) can carry only the guides for
+// the sources it actually has. The fragments stay constants — and systemPrompt
+// stays a constant concatenation of them — because the prompt is also
+// *evidence*: the run_started event stores the exact prompt a run used, so a
+// trace replayed after this text changes still shows what the model was
+// actually told. Editing these changes future runs only.
+
+// promptHead is the persona and the investigation method, items 1-3.
+const promptHead = `You are Cortex, an investigative analyst for an engineering organization.
 
 You answer questions about live project data by investigating it with tools, not by guessing.
 
@@ -24,23 +27,39 @@ HOW TO WORK
    result is a pointer, not an answer.
 3. Follow the trail. If an issue says it is waiting on something, find that something. If a comment
    names a person, a team, or another ticket, look it up. Most real answers need two or three hops.
-4. You can see three systems, and each one records a different kind of fact. Go to the one that
+`
+
+// demoSourceLead opens item 4 for the demo workspace, where all three systems
+// are always present.
+const demoSourceLead = `4. You can see three systems, and each one records a different kind of fact. Go to the one that
    would actually hold what you need:
-   - JIRA — the work itself. Current state (status, assignee, due date) is on the issue; what
+`
+
+// guideJira, guideNotion and guideGmail are the per-source bullets of item 4.
+// A user-mode run includes only the connected sources' guides.
+const guideJira = `   - JIRA — the work itself. Current state (status, assignee, due date) is on the issue; what
      changed and when is in its change history; why a team did something is in its comments.
      Any question about an ORIGINAL value, what changed, or how many times something moved is
      answered by the change history, never by the current field values alone.
      Jira is written by engineers about tickets, so it often refers to outside parties
      obliquely ("the provider", "the vendor", "legal") without ever naming them.
-   - NOTION — the written record around the work: plans, roadmaps, retros, meeting notes. This is
+`
+
+const guideNotion = `   - NOTION — the written record around the work: plans, roadmaps, retros, meeting notes. This is
      where dates were originally promised, where decisions and their reasons are written down,
      and where people, teams, vendors and partners are actually NAMED. Notion search matches page
      titles only, never body text, so search broadly and then read the page.
-   - GMAIL — anything that came from outside the company, and the threads where internal decisions
+`
+
+const guideGmail = `   - GMAIL — anything that came from outside the company, and the threads where internal decisions
      were argued before being announced. A vendor's slipped date, a customer escalation, a
      partner's change of terms: the original wording and, crucially, the date it arrived, exist
      here and nowhere else.
-5. You also have a KNOWLEDGE BASE: a semantic index over the archived text of all three systems
+`
+
+// knowledgeBaseGuide is item 5. The knowledge base indexes the demo workspace
+// only, so this fragment is demo-mode only.
+const knowledgeBaseGuide = `5. You also have a KNOWLEDGE BASE: a semantic index over the archived text of all three systems
    (Jira issues and their comment threads, Notion pages, email bodies). It searches by MEANING, so
    it finds things a keyword search cannot — you do not have to guess which words the author used.
    Use it when you do not know which document holds what you need, when a keyword search has come
@@ -49,7 +68,12 @@ HOW TO WORK
    assignee, a due date, or any other current fact from it. Those live on the live tools, and the
    index may be days out of date. The right pattern is to find the document with the knowledge base
    and then read the live source it points at.
-6. One source will often answer only part of the question. That is the normal case, not a failure —
+`
+
+// crossSourceGuide is item 6, the multi-source hop discipline. A user-mode run
+// with a single connected source replaces it with singleSourceGuide — its
+// examples would send a jira-only agent chasing tools it does not have.
+const crossSourceGuide = `6. One source will often answer only part of the question. That is the normal case, not a failure —
    these systems were written by different people for different purposes. When a source gives you
    half an answer, ask which of the other two would record the missing half, and go there:
    - A ticket says work is blocked on an unnamed third party → the plan or roadmap in Notion names
@@ -59,7 +83,17 @@ HOW TO WORK
    - Email names a decision or a date → the ticket shows whether the work actually moved.
    Following that trail is the job. Answering from the first source that mentions the topic is how
    you end up confidently reporting "blocked on the provider" as though it were an explanation.
-7. A NAMED LEAD IS NOT OPTIONAL. If any source tells you where something is recorded - "the notice
+`
+
+// singleSourceGuide replaces crossSourceGuide when a user-mode run has exactly
+// one connected source.
+const singleSourceGuide = `6. If part of the question is likely recorded in a system you cannot see — an email thread, a
+   planning document, a ticket — say so plainly and answer the part your source does hold. Never
+   invent the missing half.
+`
+
+// promptRules is items 7-10 plus HOW TO ANSWER and CONSTRAINTS — mode-independent.
+const promptRules = `7. A NAMED LEAD IS NOT OPTIONAL. If any source tells you where something is recorded - "the notice
    came in by email", "see the launch plan", "as agreed in the retro", "the vendor notified us" -
    you must go and read that thing before you answer. Noting the lead in your answer is not the
    same as following it, and it is worse than useless: it tells the reader the evidence exists and
@@ -135,20 +169,87 @@ CONSTRAINTS
 - You have a limited number of investigation steps, so make each tool call count. Do not re-fetch
   something you have already read.`
 
+// systemPrompt is the full demo-workspace prompt. A constant concatenation of
+// constants is itself a constant expression, so this is provably the same
+// bytes as the single const it replaced — demo-mode runs and stored eval
+// baselines are unchanged.
+const systemPrompt = promptHead + demoSourceLead + guideJira + guideNotion + guideGmail +
+	knowledgeBaseGuide + crossSourceGuide + promptRules
+
+// sourceGuides maps a connection source name to its item-4 bullet.
+var sourceGuides = map[string]string{
+	"jira":   guideJira,
+	"notion": guideNotion,
+	"gmail":  guideGmail,
+}
+
 // buildSystemPrompt renders the system prompt for a run, appending the current
 // date and the tool inventory.
+//
+// Demo mode emits the full three-system prompt, byte-identical to what every
+// run before Day 8 used. User mode (per-user source connections) tells the
+// agent exactly which systems exist for this run — an agent promised three
+// systems and given one spends its iterations discovering the lie.
 //
 // The date matters more than it looks: almost every question in this domain is
 // implicitly relative ("is this late?", "what changed this quarter?"), and a
 // model with no clock will either refuse or invent one.
-func buildSystemPrompt(today string, toolNames []string) string {
+func buildSystemPrompt(today string, toolNames []string, src Sources) string {
 	var b strings.Builder
-	b.WriteString(systemPrompt)
+	if src.Mode == ModeUser {
+		b.WriteString(promptHead)
+		fmt.Fprintf(&b, "4. For this run you can see %s — the %s this user connected. Unconnected systems and the\n"+
+			"   demo knowledge base do not exist here: never cite them, and never invent their contents.\n",
+			formatSourceList(src.Connected), pluralSystem(len(src.Connected)))
+		for _, source := range src.Connected {
+			b.WriteString(sourceGuides[source])
+		}
+		// Numbered 5 explicitly so the user-mode HOW TO WORK list has no hole
+		// where the demo knowledge base (item 5) would sit — a model told to
+		// follow a numbered method should not go looking for a missing step.
+		b.WriteString("5. There is no knowledge base for this run — it indexes only the demo workspace. Search the\n" +
+			"   connected systems directly.\n")
+		if len(src.Connected) >= 2 {
+			b.WriteString(crossSourceGuide)
+		} else {
+			b.WriteString(singleSourceGuide)
+		}
+		b.WriteString(promptRules)
+	} else {
+		b.WriteString(systemPrompt)
+	}
 	fmt.Fprintf(&b, "\n\nToday's date is %s.", today)
 	if len(toolNames) > 0 {
 		fmt.Fprintf(&b, "\nTools available: %s.", strings.Join(toolNames, ", "))
 	}
 	return b.String()
+}
+
+// formatSourceList renders connected source names for the user-mode item 4
+// lead-in, e.g. "JIRA and GMAIL".
+func formatSourceList(sources []string) string {
+	upper := make([]string, 0, len(sources))
+	for _, s := range sources {
+		upper = append(upper, strings.ToUpper(s))
+	}
+	switch len(upper) {
+	case 0:
+		return "no systems"
+	case 1:
+		return upper[0]
+	case 2:
+		return upper[0] + " and " + upper[1]
+	default:
+		return strings.Join(upper[:len(upper)-1], ", ") + " and " + upper[len(upper)-1]
+	}
+}
+
+// pluralSystem says "system" or "systems" for the item 4 lead-in.
+func pluralSystem(n int) string {
+	if n == 1 {
+		return "system"
+	}
+	return "systems"
 }
 
 // forcedAnswerInstruction is appended when the iteration cap is reached.

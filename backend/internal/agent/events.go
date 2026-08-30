@@ -87,7 +87,25 @@ type runStartedPayload struct {
 	MaxIterations  int            `json:"max_iterations"`
 	SystemPrompt   string         `json:"system_prompt"`
 	Tools          []string       `json:"tools"`
+	Sources        sourcesPayload `json:"sources"`
 	History        []eventMessage `json:"history"`
+}
+
+// sourcesPayload records which workspace the run's tools reached — the demo
+// workspace or the owner's connected sources — so a trace is honest about
+// what it searched. Events written before Day 8 unmarshal it to the zero
+// value, which readers treat as "recorded before sources were tracked".
+type sourcesPayload struct {
+	Mode      string   `json:"mode"`
+	Connected []string `json:"connected"`
+}
+
+// connectedOrEmpty keeps the recorded connected list a JSON array, never null.
+func connectedOrEmpty(connected []string) []string {
+	if connected == nil {
+		return []string{}
+	}
+	return connected
 }
 
 // llmCallPayload is the payload of EventLLMCall.

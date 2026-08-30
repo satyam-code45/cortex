@@ -35,6 +35,9 @@ func (n *namedValue) name(fallback string) string {
 type userValue struct {
 	AccountID   string `json:"accountId"`
 	DisplayName string `json:"displayName"`
+	// EmailAddress is set only on /myself (and even there Atlassian privacy
+	// settings may hide it); issue/comment user references omit it.
+	EmailAddress string `json:"emailAddress"`
 }
 
 // display safely reads a possibly-absent user's display name.

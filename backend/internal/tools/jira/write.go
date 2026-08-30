@@ -50,20 +50,43 @@ type Project struct {
 	Name string      `json:"name"`
 }
 
+// Account describes the account an API token authenticates as. Email may be
+// empty — Atlassian privacy settings can hide it even on /myself.
+type Account struct {
+	AccountID   string
+	DisplayName string
+	Email       string
+}
+
+// Myself returns the account the API token authenticates as. It doubles as
+// the live credential check for the paste-a-key connection flow (Day 8): a
+// bad token surfaces here as an APIError before anything is stored.
+func (c *Client) Myself(ctx context.Context) (Account, error) {
+	var user userValue
+	if err := c.get(ctx, "/rest/api/3/myself", nil, &user); err != nil {
+		return Account{}, fmt.Errorf("get current user: %w", err)
+	}
+	if user.AccountID == "" {
+		return Account{}, errors.New("jira: /myself returned no accountId")
+	}
+	return Account{
+		AccountID:   user.AccountID,
+		DisplayName: user.DisplayName,
+		Email:       user.EmailAddress,
+	}, nil
+}
+
 // CurrentUser returns the account the API token authenticates as.
 //
 // The seeder needs it for leadAccountId when creating a project, and as the
 // assignee for every issue: a free site has exactly one real user, so intended
 // owners are recorded in labels and descriptions instead.
 func (c *Client) CurrentUser(ctx context.Context) (accountID, displayName string, err error) {
-	var user userValue
-	if err := c.get(ctx, "/rest/api/3/myself", nil, &user); err != nil {
-		return "", "", fmt.Errorf("get current user: %w", err)
+	account, err := c.Myself(ctx)
+	if err != nil {
+		return "", "", err
 	}
-	if user.AccountID == "" {
-		return "", "", errors.New("jira: /myself returned no accountId")
-	}
-	return user.AccountID, user.DisplayName, nil
+	return account.AccountID, account.DisplayName, nil
 }
 
 // GetProject looks up a project by key. It returns (nil, nil) when the project

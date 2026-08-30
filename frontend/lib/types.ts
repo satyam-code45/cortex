@@ -70,6 +70,25 @@ export interface LLMKeyInfo {
   last4: string;
 }
 
+// ---- Connections (backend/internal/api/connections.go) ----
+
+// sourceStatus
+export interface ConnectionSourceStatus {
+  status: "connected" | "error" | "absent";
+  // Display facts captured at connect time (site URL, account name, mailbox
+  // address) — the API never returns credentials.
+  identity?: Record<string, string>;
+  updated_at?: string | null;
+  last_error?: string;
+}
+
+// connectionsResponse
+export interface ConnectionsInfo {
+  mode: "demo" | "user";
+  use_demo_workspace: boolean;
+  sources: Record<SourceName, ConnectionSourceStatus>;
+}
+
 // ---- Sources (backend/internal/api/documents.go) ----
 
 export type SourceName = "jira" | "notion" | "gmail";
@@ -213,7 +232,15 @@ export interface RunStartedPayload {
   max_iterations: number;
   system_prompt: string;
   tools: string[];
+  // Absent on runs recorded before Day 8.
+  sources?: RunSources;
   history: EventMessage[];
+}
+
+// sourcesPayload (backend/internal/agent/events.go)
+export interface RunSources {
+  mode: "demo" | "user" | "";
+  connected: string[];
 }
 
 // llmCallPayload
