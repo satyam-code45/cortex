@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"cortex/internal/agent"
+	"cortex/internal/auth"
 	"cortex/internal/store"
 )
 
@@ -66,9 +67,8 @@ func (s *Server) handleRunEvents(w http.ResponseWriter, r *http.Request) {
 	// exposes the full transcript, so an unknown or foreign run must 404 as a
 	// plain JSON error while that is still possible.
 	q := store.New(s.deps.DB)
-	user, err := q.UpsertUser(r.Context(), s.deps.DevUserEmail)
-	if err != nil {
-		logger.Error("events: failed to resolve user", "error", err)
+	user, ok := auth.UserFrom(r.Context())
+	if !ok {
 		writeError(w, logger, http.StatusInternalServerError, "failed to open event stream")
 		return
 	}

@@ -42,13 +42,12 @@ type Config struct {
 	// TokenSource supplies access tokens, refreshing as needed.
 	TokenSource *TokenSource
 
-	// QueryScope, when set, is ANDed into every search.
+	// QueryScope is ANDed into every search (required).
 	//
-	// Cortex reads a real mailbox, so unset — the default — means the agent
-	// searches all of it, which is the product working as intended. Setting it
-	// to a label (e.g. `label:vantage-labs`) confines the agent to the seeded
-	// fixtures, which is what makes an eval score reproducible and keeps
-	// personal mail out of a graded answer.
+	// Cortex reads a real mailbox, and since sign-in opened (Day 7) any Google
+	// account can drive the agent — so the pin to a label (e.g.
+	// `label:vantage-labs`) is a structural property of the client, not a
+	// configuration suggestion: NewClient refuses to construct without it.
 	QueryScope string
 
 	// HTTPClient is optional; a timeout-bearing client is built when nil.
@@ -80,6 +79,9 @@ type Client struct {
 func NewClient(cfg Config) (*Client, error) {
 	if cfg.TokenSource == nil {
 		return nil, errors.New("gmail: TokenSource is required")
+	}
+	if strings.TrimSpace(cfg.QueryScope) == "" {
+		return nil, errors.New("gmail: QueryScope is required — an unscoped client could search the whole mailbox")
 	}
 
 	base := cfg.BaseURL

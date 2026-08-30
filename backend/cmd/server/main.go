@@ -16,14 +16,12 @@ import (
 
 	"cortex/internal/api"
 	"cortex/internal/app"
+	"cortex/internal/auth"
 	"cortex/internal/config"
 	"cortex/internal/jobs"
 )
 
 const (
-	// devUserEmail is the single hardcoded user until auth lands.
-	devUserEmail = "dev@cortex.local"
-
 	// shutdownTimeout is how long in-flight requests get to drain.
 	shutdownTimeout = 10 * time.Second
 	// readHeaderTimeout guards against slow-header (Slowloris) clients.
@@ -70,7 +68,8 @@ func run(logger *slog.Logger) error {
 	// The shared graph — provider, source clients, indexer, tool registry,
 	// orchestrator — is assembled by internal/app so cmd/eval runs exactly the
 	// same agent this server does.
-	deps, err := app.Build(ctx, cfg, logger)
+	// BYOK on: each run's completion calls are made on its owner's stored key.
+	deps, err := app.Build(ctx, cfg, logger, app.Options{BYOK: true})
 	if err != nil {
 		return err
 	}
@@ -116,26 +115,39 @@ func run(logger *slog.Logger) error {
 		"index_queue", jobs.IndexSourceQueue, "index_workers", cfg.IndexWorkers,
 		"tools", deps.Registry.Len())
 
-	// There is no authentication yet, and Day 4 widened what an unauthenticated
-	// reader gets: GET /api/runs/{id}/trace returns full tool observations
-	// (verbatim email and ticket bodies), and POST /api/admin/index queues paid
-	// crawls. The loopback default is what closes all of that, so leaving it is a
-	// deliberate exposure and should not be silent. hostCheck still rejects a
-	// forged Host, but it cannot tell a LAN peer from localhost.
+	// Auth exists since Day 7, but hostCheck still only admits localhost names —
+	// exposing beyond loopback needs that list widened too, so say so.
 	if !isLoopback(cfg.Host) {
-		logger.Warn("server is bound beyond loopback and the API has no authentication",
-			"host", cfg.Host,
-			"exposed", "GET /api/runs/{id}/trace, POST /api/chat, POST /api/admin/index")
+		logger.Warn("server is bound beyond loopback; hostCheck only admits localhost Host headers",
+			"host", cfg.Host)
 	}
 
 	handler := api.NewRouter(api.Deps{
 		DB:             deps.Pool,
 		Enqueuer:       queue,
 		Model:          cfg.LLMModel,
-		DevUserEmail:   devUserEmail,
 		IndexSources:   deps.Indexer.Sources(),
 		FrontendOrigin: cfg.FrontendOrigin,
 		Logger:         logger,
+
+		OIDC: &auth.OIDC{
+			Client: auth.Client{
+				ID:       cfg.GoogleOAuthClientID,
+				Secret:   cfg.GoogleOAuthClientSecret,
+				AuthURL:  auth.GoogleAuthURL,
+				TokenURL: auth.GoogleTokenURL,
+			},
+			JWKS:        auth.NewJWKSCache(auth.GoogleJWKSURL, nil),
+			RedirectURI: "http://localhost:" + cfg.Port + "/api/auth/google/callback",
+		},
+		Keys:                 deps.Keys,
+		APIToken:             cfg.AuthAPIToken,
+		BearerEmail:          cfg.DevUserEmail,
+		AllowedEmails:        lowered(cfg.AuthAllowedEmails),
+		AdminEmails:          lowered(cfg.AdminEmails),
+		RunsPerUserPerHour:   cfg.RunsPerUserPerHour,
+		IndexRefreshCooldown: cfg.IndexRefreshCooldown,
+		OpenAIBaseURL:        cfg.OpenAIBaseURL,
 	})
 
 	srv := &http.Server{
@@ -185,6 +197,16 @@ func run(logger *slog.Logger) error {
 	}
 
 	return <-serveErr
+}
+
+// lowered lower-cases every entry, so the allowlist comparison matches the
+// lower-cased email the callback extracts from the ID token.
+func lowered(items []string) []string {
+	out := make([]string, len(items))
+	for i, item := range items {
+		out[i] = strings.ToLower(item)
+	}
+	return out
 }
 
 // isLoopback reports whether the configured bind address reaches only this

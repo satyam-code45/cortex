@@ -216,10 +216,15 @@ func (f *fakeGmail) client(queryScope string) *gmail.Client {
 	return c
 }
 
+// testQueryScope is the scope tests build clients with: since Day 7 an
+// unscoped client refuses to construct, so there is no "whole mailbox" client
+// to test against.
+const testQueryScope = "label:vantage-labs"
+
 // tool returns one tool by name, failing when it is not registered.
 func (f *fakeGmail) tool(name string) tools.Tool {
 	f.t.Helper()
-	return f.scopedTool(name, "")
+	return f.scopedTool(name, testQueryScope)
 }
 
 // scopedTool returns one tool built against a client with the given

@@ -2,9 +2,6 @@ package gmail
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,19 +10,21 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
+	"cortex/internal/auth"
 	"cortex/internal/tools/httpx"
 )
 
-// OAuth against Google, hand-rolled.
+// OAuth against Google.
 //
-// The flow is small enough to own outright — an authorization URL, one form
-// POST to exchange the code, one more to refresh — and owning it keeps the
-// locked stack in CLAUDE.md intact and the whole path testable against
-// httptest, which a vendored SDK's internal transport is not.
+// The generic pieces — PKCE, state, the consent URL, the code exchange, the
+// OAuth error shape — live in internal/auth since Day 7, shared with Google
+// sign-in. What stays here is the Gmail-flow specifics: the credential file
+// format, the on-disk token cache, the refreshing TokenSource, and the two
+// knobs a data-access flow needs that a sign-in must not have
+// (access_type=offline + prompt=consent, and the demand for a refresh token).
 //
 // The security-relevant choices, none of which are defaults:
 //
@@ -214,51 +213,30 @@ func SaveToken(path string, token *Token) error {
 	return nil
 }
 
-// PKCE is one authorization attempt's proof key.
-type PKCE struct {
-	Verifier  string
-	Challenge string
-}
+// PKCE is one authorization attempt's proof key. Alias, not a wrapper: the
+// same value flows between this package and internal/auth.
+type PKCE = auth.PKCE
 
 // NewPKCE generates a code verifier and its S256 challenge.
-func NewPKCE() (*PKCE, error) {
-	raw := make([]byte, 32)
-	if _, err := rand.Read(raw); err != nil {
-		return nil, fmt.Errorf("gmail: generate PKCE verifier: %w", err)
-	}
-	verifier := base64.RawURLEncoding.EncodeToString(raw)
-	sum := sha256.Sum256([]byte(verifier))
-	return &PKCE{
-		Verifier:  verifier,
-		Challenge: base64.RawURLEncoding.EncodeToString(sum[:]),
-	}, nil
-}
+func NewPKCE() (*PKCE, error) { return auth.NewPKCE() }
 
 // RandomState generates an anti-forgery state value.
-func RandomState() (string, error) {
-	raw := make([]byte, 16)
-	if _, err := rand.Read(raw); err != nil {
-		return "", fmt.Errorf("gmail: generate state: %w", err)
-	}
-	return base64.RawURLEncoding.EncodeToString(raw), nil
-}
+func RandomState() (string, error) { return auth.RandomState() }
 
 // AuthCodeURL builds the consent URL the operator opens in a browser.
 func (c *Credentials) AuthCodeURL(redirectURI, state string, pkce *PKCE, scopes []string) string {
-	query := url.Values{}
-	query.Set("client_id", c.ClientID)
-	query.Set("redirect_uri", redirectURI)
-	query.Set("response_type", "code")
-	query.Set("scope", strings.Join(scopes, " "))
-	query.Set("state", state)
-	query.Set("code_challenge", pkce.Challenge)
-	query.Set("code_challenge_method", "S256")
-	// offline is what makes Google return a refresh token at all, and consent
-	// forces it to be re-issued even if this account has authorized before —
-	// without which a second run yields an access token and no way to renew it.
-	query.Set("access_type", "offline")
-	query.Set("prompt", "consent")
-	return c.AuthURI + "?" + query.Encode()
+	client := auth.Client{ID: c.ClientID, Secret: c.ClientSecret, AuthURL: c.AuthURI, TokenURL: c.TokenURI}
+	return client.AuthCodeURL(auth.AuthCodeParams{
+		RedirectURI: redirectURI,
+		State:       state,
+		PKCE:        pkce,
+		Scopes:      scopes,
+		// offline is what makes Google return a refresh token at all, and
+		// consent forces it to be re-issued even if this account has authorized
+		// before — without which a second run yields an access token and no way
+		// to renew it. Sign-in deliberately passes neither.
+		Extra: url.Values{"access_type": {"offline"}, "prompt": {"consent"}},
+	})
 }
 
 // TokenSource hands out access tokens, refreshing and re-persisting as needed.
@@ -372,7 +350,7 @@ func (s *TokenSource) refreshLocked(ctx context.Context) error {
 	form.Set("refresh_token", s.token.RefreshToken)
 	form.Set("grant_type", "refresh_token")
 
-	response, err := postForm(ctx, s.http, s.tokenEndpointPath, form)
+	response, err := auth.PostTokenForm(ctx, s.http, s.tokenEndpointPath, form)
 	if err != nil {
 		return err
 	}
@@ -415,123 +393,39 @@ func ExchangeCode(
 	pkce *PKCE,
 	httpClient *http.Client,
 ) (*Token, error) {
-	base, path, err := splitEndpoint(creds.TokenURI)
-	if err != nil {
-		return nil, err
-	}
-	transport, err := httpx.New(httpx.Config{
-		Name:        "gmail-oauth",
-		BaseURL:     base,
-		HTTPClient:  httpClient,
-		MinInterval: -1,
-		ParseError:  parseOAuthError,
+	client := auth.Client{ID: creds.ClientID, Secret: creds.ClientSecret, AuthURL: creds.AuthURI, TokenURL: creds.TokenURI}
+	token, err := client.ExchangeCode(ctx, code, redirectURI, pkce, auth.ExchangeOptions{
+		HTTPClient: httpClient,
+		// This flow exists to obtain a refresh token — the durable credential
+		// the server's TokenSource lives on. Without one the exchange failed at
+		// its purpose, whatever the HTTP status said.
+		RequireRefreshToken: true,
 	})
-	if err != nil {
-		return nil, err
-	}
-
-	form := url.Values{}
-	form.Set("client_id", creds.ClientID)
-	form.Set("client_secret", creds.ClientSecret)
-	form.Set("code", code)
-	form.Set("redirect_uri", redirectURI)
-	form.Set("grant_type", "authorization_code")
-	form.Set("code_verifier", pkce.Verifier)
-
-	response, err := postForm(ctx, transport, path, form)
-	if err != nil {
-		return nil, err
-	}
-	if response.RefreshToken == "" {
+	if errors.Is(err, auth.ErrNoRefreshToken) {
 		return nil, errors.New("gmail: Google returned no refresh token; " +
 			"revoke Cortex's access at https://myaccount.google.com/permissions and authorize again")
 	}
-	return &Token{
-		RefreshToken: response.RefreshToken,
-		AccessToken:  response.AccessToken,
-		TokenType:    response.TokenType,
-		Expiry:       time.Now().Add(time.Duration(response.ExpiresIn) * time.Second),
-		Scope:        response.Scope,
-	}, nil
-}
-
-// tokenResponse is Google's token endpoint payload.
-type tokenResponse struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	TokenType    string `json:"token_type"`
-	ExpiresIn    int    `json:"expires_in"`
-	Scope        string `json:"scope"`
-}
-
-// postForm posts a form-encoded body to the token endpoint.
-func postForm(ctx context.Context, client *httpx.Client, path string, form url.Values) (*tokenResponse, error) {
-	var response tokenResponse
-	err := client.Do(ctx, httpx.Request{
-		Method:      http.MethodPost,
-		Path:        path,
-		RawBody:     []byte(form.Encode()),
-		ContentType: "application/x-www-form-urlencoded",
-	}, &response)
 	if err != nil {
 		return nil, err
 	}
-	if response.AccessToken == "" {
-		return nil, errors.New("gmail: token endpoint returned no access token")
-	}
-	return &response, nil
+	return &Token{
+		RefreshToken: token.RefreshToken,
+		AccessToken:  token.AccessToken,
+		TokenType:    token.TokenType,
+		Expiry:       token.Expiry,
+		Scope:        token.Scope,
+	}, nil
 }
 
-// OAuthError is a failure from Google's token endpoint.
-type OAuthError struct {
-	StatusCode  int
-	Code        string
-	Description string
-}
-
-func (e *OAuthError) Error() string {
-	switch {
-	case e.Code != "" && e.Description != "":
-		return fmt.Sprintf("gmail: oauth %s: %s", e.Code, e.Description)
-	case e.Code != "":
-		return fmt.Sprintf("gmail: oauth %s (HTTP %d)", e.Code, e.StatusCode)
-	default:
-		return fmt.Sprintf("gmail: oauth failed with HTTP %d", e.StatusCode)
-	}
-}
-
-// Permanent reports whether retrying is pointless. An invalid_grant means the
-// refresh token has been revoked or expired, and no number of retries will
-// bring it back — only re-running the auth flow will.
-func (e *OAuthError) Permanent() bool { return httpx.PermanentStatus(e.StatusCode) }
+// OAuthError is a failure from Google's token endpoint. Alias so errors.As
+// works identically across this package and internal/auth.
+type OAuthError = auth.OAuthError
 
 // parseOAuthError extracts Google's OAuth error shape.
-func parseOAuthError(status int, raw []byte) error {
-	oauthErr := &OAuthError{StatusCode: status}
-	var body struct {
-		Error       string `json:"error"`
-		Description string `json:"error_description"`
-	}
-	if err := json.Unmarshal(raw, &body); err == nil {
-		oauthErr.Code = body.Error
-		oauthErr.Description = body.Description
-	}
-	return oauthErr
-}
+func parseOAuthError(status int, raw []byte) error { return auth.ParseOAuthError(status, raw) }
 
 // splitEndpoint splits a full URL into an origin and a path, which is the shape
 // httpx.Client wants.
 func splitEndpoint(endpoint string) (base, path string, err error) {
-	parsed, err := url.Parse(strings.TrimSpace(endpoint))
-	if err != nil {
-		return "", "", fmt.Errorf("gmail: token endpoint is not a valid URL: %w", err)
-	}
-	if parsed.Scheme == "" || parsed.Host == "" {
-		return "", "", fmt.Errorf("gmail: token endpoint %q is not absolute", endpoint)
-	}
-	path = parsed.Path
-	if path == "" {
-		path = "/"
-	}
-	return parsed.Scheme + "://" + parsed.Host, path, nil
+	return auth.SplitEndpoint(endpoint)
 }

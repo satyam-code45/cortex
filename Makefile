@@ -81,4 +81,4 @@ eval: ## run the evaluation suite
 # request without it, which is what forces a browser to preflight it and stops
 # any page you happen to be visiting from queueing crawls at your local server.
 index: ## trigger reindexing of all sources into the vector store
-	curl -sS -f -X POST -H 'Content-Type: application/json' -d '{}' localhost:$(PORT)/api/admin/index
+	curl -sS -f -X POST -H 'Content-Type: application/json' -H "Authorization: Bearer $(AUTH_API_TOKEN)" -d '{}' localhost:$(PORT)/api/admin/index

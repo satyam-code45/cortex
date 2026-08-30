@@ -32,7 +32,10 @@ type RunnerConfig struct {
 	Model string
 	// Concurrency is the worker-pool size; the -concurrency flag, default 4.
 	Concurrency int
-	Logger      *slog.Logger
+	// UserEmail owns the eval's conversations; the -user flag, defaulting to
+	// evalUserEmail so eval artifacts keep landing under the same user.
+	UserEmail string
+	Logger    *slog.Logger
 }
 
 // Runner executes eval cases through the real agent.
@@ -47,6 +50,7 @@ type Runner struct {
 	grader      *Grader
 	model       string
 	concurrency int
+	userEmail   string
 	logger      *slog.Logger
 }
 
@@ -72,12 +76,17 @@ func NewRunner(cfg RunnerConfig) (*Runner, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	userEmail := cfg.UserEmail
+	if userEmail == "" {
+		userEmail = evalUserEmail
+	}
 	return &Runner{
 		db:          cfg.DB,
 		orch:        cfg.Orchestrator,
 		grader:      cfg.Grader,
 		model:       cfg.Model,
 		concurrency: concurrency,
+		userEmail:   userEmail,
 		logger:      logger,
 	}, nil
 }
@@ -221,7 +230,7 @@ func (r *Runner) runCase(ctx context.Context, c Case) CaseResult {
 // and parallel cases share nothing but the pool.
 func (r *Runner) setupRun(ctx context.Context, c Case) (runID, userID uuid.UUID, err error) {
 	err = store.WithTx(ctx, r.db, func(q store.Querier) error {
-		user, err := q.UpsertUser(ctx, evalUserEmail)
+		user, err := q.UpsertUser(ctx, r.userEmail)
 		if err != nil {
 			return fmt.Errorf("upsert eval user: %w", err)
 		}

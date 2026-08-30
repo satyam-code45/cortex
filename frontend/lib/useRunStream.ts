@@ -76,7 +76,7 @@ export function useRunStream(
     if (!runId) return;
 
     seenRef.current = new Set();
-    const source = new EventSource(runEventsUrl(runId));
+    const source = new EventSource(runEventsUrl(runId), { withCredentials: true });
 
     const onEvent = (type: RunEventType) => (e: MessageEvent<string>) => {
       const seq = Number(e.lastEventId);

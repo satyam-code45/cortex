@@ -4,12 +4,14 @@
 package config
 
 import (
+	"encoding/hex"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Defaults applied when the corresponding environment variable is unset.
@@ -54,6 +56,19 @@ const (
 	DefaultGmailCredentialsPath = "./gmail-credentials.json"
 	// DefaultGmailTokenPath is where cmd/gmail-auth caches the refresh token.
 	DefaultGmailTokenPath = "./.gmail-token.json"
+
+	// DefaultDevUserEmail identifies the operator: it is the user the bearer
+	// token acts as, and the default admin. It stopped being an implicit chat
+	// identity when Google sign-in landed (Day 7).
+	DefaultDevUserEmail = "dev@cortex.local"
+	// DefaultRunsPerUserPerHour bounds run creation per user. The LLM spend is
+	// the user's own key, but every run also consumes the server's Jira, Notion
+	// and Gmail quotas — the limit protects the shared part.
+	DefaultRunsPerUserPerHour = 30
+	// DefaultIndexRefreshCooldown is the minimum interval between user-triggered
+	// Sources refreshes. The upstream APIs are paginated and rate-limited; a
+	// 15-minute-fresh local copy beats a live crawl per page view.
+	DefaultIndexRefreshCooldown = 15 * time.Minute
 )
 
 // Config holds every setting the server needs. Fields map 1:1 to the variables
@@ -102,12 +117,13 @@ type Config struct {
 	JiraEmail string
 	// JiraAPIToken authenticates against the Jira REST API.
 	JiraAPIToken string
-	// JiraProjects, when set, restricts the indexing crawl to these project keys.
+	// JiraProjects restricts the agent and the indexing crawl to these project
+	// keys (required since Day 7).
 	//
-	// Empty - the default - means every project the account can see, which is
-	// Cortex working as intended: it reads live sources. Setting it is how an
-	// unrelated project (a site's pre-existing sample project, say) is kept out
-	// of the vector store. The same role GmailQueryScope plays for mail.
+	// It was optional while the only user was the operator. With Google sign-in
+	// open, the Jira site has real projects and an authenticated stranger must
+	// be structurally unable to reach outside the pinned set. The same role
+	// GmailQueryScope plays for mail.
 	JiraProjects []string
 
 	// NotionToken is the internal integration secret.
@@ -122,14 +138,44 @@ type Config struct {
 	GmailCredentialsPath string
 	// GmailTokenPath is where cmd/gmail-auth cached the refresh token.
 	GmailTokenPath string
-	// GmailQueryScope, when set, is ANDed into every Gmail search.
+	// GmailQueryScope is ANDed into every Gmail search (required since Day 7).
 	//
-	// Empty - the default - means the agent searches the whole mailbox, which
-	// is Cortex working as intended: it is a system that reads live sources.
-	// Setting it to a label (e.g. `label:vantage-labs`) confines the agent to
-	// the seeded fixtures, which is what makes a graded eval run reproducible
-	// and keeps personal mail out of a scored answer.
+	// It was optional while the only user was the operator. With Google sign-in
+	// open, the Gmail account is a real mailbox and an authenticated stranger
+	// must be structurally unable to search outside the pinned scope (e.g.
+	// `label:vantage-labs`) — so the server refuses to start without it, and
+	// the Gmail client refuses to construct without it.
 	GmailQueryScope string
+
+	// GoogleOAuthClientID identifies the OAuth Web application client used for
+	// sign-in (required). This is a separate client from the Desktop one used
+	// by cmd/gmail-auth: a Desktop client cannot take a server redirect URI.
+	GoogleOAuthClientID string
+	// GoogleOAuthClientSecret authenticates the code exchange (required).
+	GoogleOAuthClientSecret string
+	// AuthAllowedEmails, when set, restricts sign-in to these addresses.
+	// Empty means any Google account may sign in.
+	AuthAllowedEmails []string
+	// AuthAPIToken is the static bearer token for non-browser callers — make
+	// index and scripts (required). Requests carrying it act as DevUserEmail
+	// with admin rights, so it is an operator credential.
+	AuthAPIToken string
+	// AdminEmails lists the session emails allowed to call admin endpoints.
+	// Defaults to [DevUserEmail].
+	AdminEmails []string
+	// DevUserEmail is the operator identity: the user the bearer token acts as
+	// and the default admin email.
+	DevUserEmail string
+	// LLMKeyEncryptionSecret is the AES-256 key (64 hex chars = 32 bytes) that
+	// encrypts users' stored LLM API keys (required). Rotating it invalidates
+	// every stored key; users re-add them.
+	LLMKeyEncryptionSecret string
+	// RunsPerUserPerHour caps run creation per user; beyond it POST /api/chat
+	// returns 429.
+	RunsPerUserPerHour int
+	// IndexRefreshCooldown is the minimum interval between user-triggered
+	// Sources refreshes.
+	IndexRefreshCooldown time.Duration
 }
 
 // String renders the configuration with its secrets redacted.
@@ -145,13 +191,19 @@ func (c Config) String() string {
 		"MaxIterations:%d AgentRunWorkers:%d ContextTokenBudget:%d IndexMaxDocuments:%d IndexWorkers:%d "+
 		"JiraBaseURL:%s JiraEmail:%s JiraAPIToken:%s "+
 		"JiraProjects:%s NotionToken:%s NotionParentPageID:%s "+
-		"GmailCredentialsPath:%s GmailTokenPath:%s GmailQueryScope:%s}",
+		"GmailCredentialsPath:%s GmailTokenPath:%s GmailQueryScope:%s "+
+		"GoogleOAuthClientID:%s GoogleOAuthClientSecret:%s AuthAllowedEmails:%s "+
+		"AuthAPIToken:%s AdminEmails:%s DevUserEmail:%s LLMKeyEncryptionSecret:%s "+
+		"RunsPerUserPerHour:%d IndexRefreshCooldown:%s}",
 		redactDSN(c.DatabaseURL), c.Host, c.Port, c.FrontendOrigin,
 		redact(c.OpenAIAPIKey), c.OpenAIBaseURL, c.LLMModel, c.LLMUtilityModel, c.EmbeddingModel,
 		c.MaxIterations, c.AgentRunWorkers, c.ContextTokenBudget, c.IndexMaxDocuments, c.IndexWorkers,
 		c.JiraBaseURL, c.JiraEmail, redact(c.JiraAPIToken),
 		strings.Join(c.JiraProjects, ","), redact(c.NotionToken), c.NotionParentPageID,
-		c.GmailCredentialsPath, c.GmailTokenPath, c.GmailQueryScope)
+		c.GmailCredentialsPath, c.GmailTokenPath, c.GmailQueryScope,
+		c.GoogleOAuthClientID, redact(c.GoogleOAuthClientSecret), strings.Join(c.AuthAllowedEmails, ","),
+		redact(c.AuthAPIToken), strings.Join(c.AdminEmails, ","), c.DevUserEmail, redact(c.LLMKeyEncryptionSecret),
+		c.RunsPerUserPerHour, c.IndexRefreshCooldown)
 }
 
 // redactDSN strips the password from a Postgres connection string.
@@ -215,6 +267,19 @@ func Load() (*Config, error) {
 		GmailCredentialsPath: RepoPath(envOr("GMAIL_CREDENTIALS_JSON", DefaultGmailCredentialsPath)),
 		GmailTokenPath:       RepoPath(envOr("GMAIL_TOKEN_PATH", DefaultGmailTokenPath)),
 		GmailQueryScope:      strings.TrimSpace(os.Getenv("GMAIL_QUERY_SCOPE")),
+
+		GoogleOAuthClientID:     strings.TrimSpace(os.Getenv("GOOGLE_OAUTH_CLIENT_ID")),
+		GoogleOAuthClientSecret: strings.TrimSpace(os.Getenv("GOOGLE_OAUTH_CLIENT_SECRET")),
+		AuthAllowedEmails:       envList("AUTH_ALLOWED_EMAILS"),
+		AuthAPIToken:            strings.TrimSpace(os.Getenv("AUTH_API_TOKEN")),
+		AdminEmails:             envList("ADMIN_EMAILS"),
+		DevUserEmail:            envOr("DEV_USER_EMAIL", DefaultDevUserEmail),
+		LLMKeyEncryptionSecret:  strings.TrimSpace(os.Getenv("LLM_KEY_ENCRYPTION_SECRET")),
+		RunsPerUserPerHour:      envInt("RUNS_PER_USER_PER_HOUR", DefaultRunsPerUserPerHour),
+		IndexRefreshCooldown:    envDuration("INDEX_REFRESH_COOLDOWN", DefaultIndexRefreshCooldown),
+	}
+	if len(cfg.AdminEmails) == 0 {
+		cfg.AdminEmails = []string{cfg.DevUserEmail}
 	}
 
 	var missing []string
@@ -248,8 +313,35 @@ func Load() (*Config, error) {
 	// it is never empty. What matters is whether the file is there, and that is
 	// checked where it is read — cmd/server fails at startup naming the file,
 	// and cmd/gmail-auth names it too.
+	if cfg.GoogleOAuthClientID == "" {
+		missing = append(missing, "GOOGLE_OAUTH_CLIENT_ID")
+	}
+	if cfg.GoogleOAuthClientSecret == "" {
+		missing = append(missing, "GOOGLE_OAUTH_CLIENT_SECRET")
+	}
+	if cfg.AuthAPIToken == "" {
+		missing = append(missing, "AUTH_API_TOKEN")
+	}
+	if cfg.LLMKeyEncryptionSecret == "" {
+		missing = append(missing, "LLM_KEY_ENCRYPTION_SECRET")
+	}
+	// The source pins stopped being optional when sign-in opened: the Gmail
+	// account is a real mailbox and the Jira site has real projects, so an
+	// authenticated stranger must be structurally unable to reach outside the
+	// demo workspace. Empty pins are a safety hole, not a wider default.
+	if cfg.GmailQueryScope == "" {
+		missing = append(missing, "GMAIL_QUERY_SCOPE (required: pins every Gmail search to the demo slice of a real mailbox)")
+	}
+	if len(cfg.JiraProjects) == 0 {
+		missing = append(missing, "JIRA_PROJECTS (required: pins the agent to the demo Jira projects)")
+	}
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("config: missing required environment variables: %s", strings.Join(missing, ", "))
+	}
+	// A wrong-length key would otherwise surface as a crypto error on the first
+	// key save, far from the .env line that caused it.
+	if raw, err := hex.DecodeString(cfg.LLMKeyEncryptionSecret); err != nil || len(raw) != 32 {
+		return nil, fmt.Errorf("config: LLM_KEY_ENCRYPTION_SECRET must be 64 hex characters (32 bytes, e.g. from `openssl rand -hex 32`)")
 	}
 
 	return cfg, nil
@@ -304,6 +396,20 @@ func envList(key string) []string {
 		}
 	}
 	return out
+}
+
+// envDuration reads a Go duration setting (e.g. "15m", "1h"), falling back to
+// def when unset, unparseable, or not positive — a tuning knob, like envInt.
+func envDuration(key string, def time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return def
+	}
+	parsed, err := time.ParseDuration(raw)
+	if err != nil || parsed <= 0 {
+		return def
+	}
+	return parsed
 }
 
 // envOr returns the value of key, or def when the variable is unset or empty.

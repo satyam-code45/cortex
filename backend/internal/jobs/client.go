@@ -179,6 +179,28 @@ func (q *Queue) EnqueueIndexSource(ctx context.Context, source string) error {
 	return nil
 }
 
+// NewestFinalizedIndexJob reports when the most recent index_source job
+// reached a finalized state (completed, cancelled, or discarded), and whether
+// any has. It is the Sources refresh cooldown's source of truth: River's job
+// rows record every crawl, where documents.updated_at freezes whenever a
+// refresh changes nothing (the content-hash short-circuit writes no rows).
+// Going through River's JobList API rather than querying river_job keeps the
+// no-hand-rolled-SQL rule intact — the table is River's, not ours.
+func (q *Queue) NewestFinalizedIndexJob(ctx context.Context) (finishedAt time.Time, ok bool, err error) {
+	result, err := q.client.JobList(ctx, river.NewJobListParams().
+		Kinds((IndexSourceArgs{}).Kind()).
+		States(rivertype.JobStateCompleted, rivertype.JobStateCancelled, rivertype.JobStateDiscarded).
+		OrderBy(river.JobListOrderByFinalizedAt, river.SortOrderDesc).
+		First(1))
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("jobs: list finalized index jobs: %w", err)
+	}
+	if len(result.Jobs) == 0 || result.Jobs[0].FinalizedAt == nil {
+		return time.Time{}, false, nil
+	}
+	return *result.Jobs[0].FinalizedAt, true, nil
+}
+
 // positive returns value when it is positive, and fallback otherwise.
 func positive(value, fallback int) int {
 	if value > 0 {

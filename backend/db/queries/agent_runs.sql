@@ -31,6 +31,21 @@ SELECT r.* FROM agent_runs r
          JOIN conversations c ON c.id = r.conversation_id
 WHERE r.id = $1 AND c.user_id = $2;
 
+-- name: GetAgentRunOwner :one
+-- Runs don't carry a user_id; ownership lives on the conversation. The worker
+-- resolves the owner to build the run's LLM provider from their stored key.
+SELECT c.user_id FROM agent_runs r
+         JOIN conversations c ON c.id = r.conversation_id
+WHERE r.id = $1;
+
+-- name: CountUserRunsSince :one
+-- Per-user rate limit (REQ-7.3): the shared cost of a run is Satyam's upstream
+-- API quotas even when the LLM spend is the user's. $2 is a timestamp rather
+-- than a hardcoded interval so tests can pin the window.
+SELECT count(*) FROM agent_runs r
+         JOIN conversations c ON c.id = r.conversation_id
+WHERE c.user_id = $1 AND r.created_at > $2;
+
 -- name: StartAgentRun :one
 -- Claims a queued run. The status guard makes the transition idempotent for a
 -- River job that is retried after a worker crash (still 'running'), while

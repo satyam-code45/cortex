@@ -14,7 +14,7 @@ import (
 // The policy under test, from the spec: Access-Control-Allow-Origin is the
 // configured origin and appears on plain GETs too (EventSource never
 // preflights but enforces CORS on the response), preflight OPTIONS is answered
-// 204 with Allow-Methods "GET, POST, OPTIONS" and Allow-Headers
+// 204 with Allow-Methods "GET, POST, PUT, DELETE, OPTIONS" and Allow-Headers
 // "Content-Type", every other origin gets no allow headers, and the middleware
 // is mounted on /api/* only.
 
@@ -24,14 +24,13 @@ const testFrontendOrigin = "http://localhost:3000"
 // The stub DB is enough: the paths used below are rejected before any query,
 // and the CORS headers are set by middleware before the handler runs.
 func newCORSRouter() http.Handler {
-	return api.NewRouter(api.Deps{
+	return api.NewRouter(withTestAuth(api.Deps{
 		DB:             &stubDB{},
 		Enqueuer:       &stubEnqueuer{},
 		Model:          testModel,
-		DevUserEmail:   devUserEmail,
 		FrontendOrigin: testFrontendOrigin,
 		Logger:         discardLogger(),
-	})
+	}))
 }
 
 func TestCORSAdmitsOnlyTheConfiguredOrigin(t *testing.T) {
@@ -127,8 +126,16 @@ func TestCORSAdmitsOnlyTheConfiguredOrigin(t *testing.T) {
 				if allowOrigin != testFrontendOrigin {
 					t.Errorf("Access-Control-Allow-Origin = %q, want %q", allowOrigin, testFrontendOrigin)
 				}
-				if got := rec.Header().Get("Access-Control-Allow-Methods"); got != "GET, POST, OPTIONS" {
-					t.Errorf("Access-Control-Allow-Methods = %q, want %q", got, "GET, POST, OPTIONS")
+				// PUT and DELETE joined for /api/settings/llm-key (Day 7).
+				const wantAllowMethods = "GET, POST, PUT, DELETE, OPTIONS"
+				if got := rec.Header().Get("Access-Control-Allow-Methods"); got != wantAllowMethods {
+					t.Errorf("Access-Control-Allow-Methods = %q, want %q", got, wantAllowMethods)
+				}
+				// Sessions are cookies; without this grant the browser drops
+				// every credentialed response. Safe only with the exact-match
+				// origin this router enforces.
+				if got := rec.Header().Get("Access-Control-Allow-Credentials"); got != "true" {
+					t.Errorf("Access-Control-Allow-Credentials = %q, want %q", got, "true")
 				}
 				// Last-Event-ID is required for cross-origin SSE resume:
 				// EventSource's reconnect preflights it (only the first

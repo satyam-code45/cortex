@@ -134,13 +134,12 @@ func TestGetRunReportsState(t *testing.T) {
 func TestGetRunRejectsBadIDs(t *testing.T) {
 	t.Parallel()
 
-	h := api.NewRouter(api.Deps{
-		DB:           &stubDB{},
-		Enqueuer:     &stubEnqueuer{},
-		Model:        testModel,
-		DevUserEmail: devUserEmail,
-		Logger:       discardLogger(),
-	})
+	h := api.NewRouter(withTestAuth(api.Deps{
+		DB:       &stubDB{},
+		Enqueuer: &stubEnqueuer{},
+		Model:    testModel,
+		Logger:   discardLogger(),
+	}))
 
 	rec := getRun(t, h, "not-a-uuid")
 	if rec.Code != http.StatusBadRequest {

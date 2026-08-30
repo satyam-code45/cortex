@@ -55,6 +55,68 @@ export interface ApiError {
   error: string;
 }
 
+// meResponse (backend/internal/api/auth.go)
+export interface Me {
+  email: string;
+  name: string;
+  avatar_url: string;
+  has_llm_key: boolean;
+  provider?: string;
+}
+
+// llmKeyResponse (backend/internal/api/settings.go)
+export interface LLMKeyInfo {
+  provider: string;
+  last4: string;
+}
+
+// ---- Sources (backend/internal/api/documents.go) ----
+
+export type SourceName = "jira" | "notion" | "gmail";
+
+// Query half of GET /api/documents.
+export interface DocumentsQuery {
+  source?: SourceName;
+  q?: string;
+  limit?: number;
+  offset?: number;
+}
+
+// documentRow
+export interface DocumentRow {
+  id: string;
+  source: SourceName;
+  title: string;
+  url: string;
+  snippet: string;
+  source_timestamp: string | null;
+}
+
+// documentsResponse
+export interface DocumentsResponse {
+  documents: DocumentRow[];
+  counts: Record<string, number>;
+  last_indexed: Record<string, string>;
+  last_refreshed: string | null;
+}
+
+// documentDetail
+export interface DocumentDetail {
+  id: string;
+  source: SourceName;
+  external_id: string;
+  title: string;
+  url: string;
+  content: string;
+  source_timestamp: string | null;
+  updated_at: string;
+}
+
+// refreshResponse
+export interface RefreshResponse {
+  queued: string[];
+}
+
 // ---- Trace (backend/internal/agent/trace.go) ----
 
 export interface Trace {

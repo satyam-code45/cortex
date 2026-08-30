@@ -80,7 +80,13 @@ func corsMiddleware(allowedOrigin string, exemptPaths ...string) func(http.Handl
 			if !isExempt && allowedOrigin != "" && r.Header.Get("Origin") == allowedOrigin {
 				h := w.Header()
 				h.Set("Access-Control-Allow-Origin", allowedOrigin)
-				h.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+				h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+				// Sessions are cookies, and a browser neither sends them
+				// cross-origin nor delivers the response without this grant.
+				// Safe only because the origin above is a single exact match —
+				// Allow-Credentials with a reflected or wildcarded origin would
+				// hand every website the user's session.
+				h.Set("Access-Control-Allow-Credentials", "true")
 				// Last-Event-ID is not CORS-safelisted, and EventSource sends
 				// it when it reconnects — only the FIRST connect skips the
 				// preflight. Without it here, a dropped SSE connection

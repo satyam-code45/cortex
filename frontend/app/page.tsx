@@ -9,10 +9,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import Link from "next/link";
+
 import { ConversationList } from "@/components/chat/ConversationList";
 import { MessageInput } from "@/components/chat/MessageInput";
 import { MessageThread } from "@/components/chat/MessageThread";
-import { ThemeToggle } from "@/components/ThemeToggle";
+import { useAuthContext } from "@/components/nav/AppShell";
 import { TracePanel } from "@/components/trace/TracePanel";
 import {
   ApiRequestError,
@@ -25,6 +27,7 @@ import type { Conversation, Message, Trace } from "@/lib/types";
 import { useRunStream } from "@/lib/useRunStream";
 
 export default function Home() {
+  const { me } = useAuthContext();
   const [conversations, setConversations] = useState<Conversation[] | null>(
     null,
   );
@@ -192,13 +195,13 @@ export default function Home() {
   const investigating =
     sending && stream.status !== "terminal" && stream.answer === null;
 
+  // BYOK: chat runs on the user's own key, so no key = no input. A disabled
+  // box with no explanation reads as a bug; the call-to-action is the state.
+  const needsKey = me !== null && !me.has_llm_key;
+
   return (
     <div className="flex h-full">
       <aside className="flex w-64 shrink-0 flex-col border-r">
-        <div className="flex items-center justify-between border-b p-3">
-          <h1 className="text-sm font-semibold tracking-tight">Cortex</h1>
-          <ThemeToggle />
-        </div>
         <ConversationList
           conversations={conversations}
           activeId={activeConversationId}
@@ -224,7 +227,16 @@ export default function Home() {
             {sendError ?? loadError}
           </p>
         )}
-        <MessageInput onSend={send} disabled={sending} />
+        {needsKey && (
+          <p className="border-t px-4 py-2 text-sm text-muted-foreground">
+            Add your API key to start asking questions —{" "}
+            <Link href="/settings" className="text-primary underline">
+              add it in Settings
+            </Link>
+            . Your key funds your own conversations; it is stored encrypted.
+          </p>
+        )}
+        <MessageInput onSend={send} disabled={sending || needsKey} />
       </main>
 
       <aside className="flex w-80 shrink-0 flex-col xl:w-[26rem]">

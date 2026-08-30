@@ -21,14 +21,13 @@ import (
 var indexSources = []string{"gmail", "jira", "notion"}
 
 func newIndexRouter(enqueuer api.Enqueuer, sources []string) http.Handler {
-	return api.NewRouter(api.Deps{
+	return api.NewRouter(withTestAuth(api.Deps{
 		DB:           &stubDB{},
 		Enqueuer:     enqueuer,
 		Model:        testModel,
-		DevUserEmail: devUserEmail,
 		IndexSources: sources,
 		Logger:       discardLogger(),
-	})
+	}))
 }
 
 func postIndex(t *testing.T, h http.Handler, body string, contentType string) *httptest.ResponseRecorder {

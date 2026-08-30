@@ -130,6 +130,16 @@ type Config struct {
 	Provider llm.Provider
 	Registry *tools.Registry
 
+	// ProviderForUser, when set, supplies each run's completion provider from
+	// its owner's stored key (BYOK, REQ-7.2) — decrypt, construct, discard.
+	// An error wrapping ErrLLMKeyUnavailable fails the run through the normal
+	// fail path (it will not heal on retry); any other error is treated as
+	// transient and returned to River for a retry. There is deliberately no
+	// fallback to Provider, because a user's missing key must never silently
+	// bill the server's. Nil — cmd/eval, tests — means every run uses
+	// Provider.
+	ProviderForUser func(ctx context.Context, userID uuid.UUID) (llm.Provider, error)
+
 	// Model is the reasoning model driving the loop.
 	Model string
 	// UtilityModel is the cheaper model used to summarize oversized results.
@@ -149,9 +159,10 @@ type Config struct {
 
 // Orchestrator runs agent loops.
 type Orchestrator struct {
-	db       DB
-	provider llm.Provider
-	registry *tools.Registry
+	db              DB
+	provider        llm.Provider
+	providerForUser func(ctx context.Context, userID uuid.UUID) (llm.Provider, error)
+	registry        *tools.Registry
 
 	model        string
 	utilityModel string
@@ -183,6 +194,7 @@ func New(cfg Config) (*Orchestrator, error) {
 	o := &Orchestrator{
 		db:                  cfg.DB,
 		provider:            cfg.Provider,
+		providerForUser:     cfg.ProviderForUser,
 		registry:            cfg.Registry,
 		model:               cfg.Model,
 		utilityModel:        cfg.UtilityModel,
@@ -221,7 +233,13 @@ func New(cfg Config) (*Orchestrator, error) {
 type runState struct {
 	runID          uuid.UUID
 	conversationID uuid.UUID
-	started        time.Time
+	// ownerID is the user who asked; their stored key funds the run's
+	// completion calls when BYOK is on.
+	ownerID uuid.UUID
+	// provider makes this run's completion calls: the owner's own (BYOK) or
+	// the orchestrator-wide one (eval, tests).
+	provider llm.Provider
+	started  time.Time
 
 	// messages is the transcript as the model sees it.
 	messages []llm.Message
@@ -299,6 +317,32 @@ func (o *Orchestrator) Run(ctx context.Context, runID uuid.UUID) error {
 		return nil
 	}
 
+	// Resolve the run's provider after the claim. A permanent failure (no key,
+	// undecryptable key — marked ErrLLMKeyUnavailable) goes through the normal
+	// fail path: the run is marked failed with a safe reason and the job is
+	// NOT retried, because the condition does not heal and there is no money
+	// to re-spend on it. Anything else is a transient fault (a database blip
+	// during the key load, say) and is returned to River for a retry —
+	// permanently failing a valid-key run with "add your API key" over a
+	// connection hiccup would be both wrong and misleading. The chat endpoint
+	// already 409s a keyless user, so the permanent branch means the key
+	// vanished between enqueue and execution.
+	state.provider = o.provider
+	if o.providerForUser != nil {
+		provider, err := o.providerForUser(ctx, state.ownerID)
+		switch {
+		case errors.Is(err, ErrLLMKeyUnavailable):
+			o.logger.Error("agent: run has no usable llm key", "run_id", runID, "error", err)
+			if failErr := o.fail(ctx, state, "llm key required — add your API key in Settings"); failErr != nil {
+				return fmt.Errorf("record failed run %s: %w", runID, failErr)
+			}
+			return nil
+		case err != nil:
+			return fmt.Errorf("resolve provider for run %s: %w", runID, err)
+		}
+		state.provider = provider
+	}
+
 	answer, forced, err := o.investigate(ctx, state)
 	if err != nil {
 		reason := safeReason(err)
@@ -325,6 +369,12 @@ func (o *Orchestrator) Run(ctx context.Context, runID uuid.UUID) error {
 	}
 	return nil
 }
+
+// ErrLLMKeyUnavailable marks a ProviderForUser failure that will not heal on
+// retry: no stored key, a key that no longer decrypts, or a provider with no
+// implementation. The factory (internal/app) wraps these; the orchestrator
+// fails the run instead of letting River retry it.
+var ErrLLMKeyUnavailable = errors.New("agent: llm key unavailable")
 
 // providerError marks an error as having come from the LLM provider, so it is
 // classified through llm.SafeErrorMessage (which strips the request URL and the
@@ -373,6 +423,12 @@ func (o *Orchestrator) begin(ctx context.Context, runID uuid.UUID) (*runState, b
 			return fmt.Errorf("claim run: %w", err)
 		}
 		state.conversationID = run.ConversationID
+
+		owner, err := q.GetAgentRunOwner(ctx, runID)
+		if err != nil {
+			return fmt.Errorf("resolve run owner: %w", err)
+		}
+		state.ownerID = owner
 
 		history, err := q.ListMessagesByConversation(ctx, run.ConversationID)
 		if err != nil {
@@ -561,9 +617,9 @@ func (o *Orchestrator) generate(
 		err  error
 	)
 	if len(definitions) > 0 {
-		resp, err = o.provider.GenerateWithTools(callCtx, request, definitions)
+		resp, err = state.provider.GenerateWithTools(callCtx, request, definitions)
 	} else {
-		resp, err = o.provider.Generate(callCtx, request)
+		resp, err = state.provider.Generate(callCtx, request)
 	}
 	latency := o.now().Sub(start)
 	if err != nil {
@@ -597,7 +653,7 @@ func (o *Orchestrator) summarize(ctx context.Context, state *runState, iteration
 	}
 
 	start := o.now()
-	resp, err := o.provider.Generate(callCtx, request)
+	resp, err := state.provider.Generate(callCtx, request)
 	latency := o.now().Sub(start)
 	if err != nil {
 		return "", &providerError{err: fmt.Errorf("summarize tool output: %w", err)}

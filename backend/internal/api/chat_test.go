@@ -45,13 +45,12 @@ func decodeChat(t *testing.T, rec *httptest.ResponseRecorder) chatBody {
 
 // newChatRouter builds a router with the given collaborators.
 func newChatRouter(db api.DB, enqueuer api.Enqueuer) http.Handler {
-	return api.NewRouter(api.Deps{
-		DB:           db,
-		Enqueuer:     enqueuer,
-		Model:        testModel,
-		DevUserEmail: devUserEmail,
-		Logger:       discardLogger(),
-	})
+	return api.NewRouter(withTestAuth(api.Deps{
+		DB:       db,
+		Enqueuer: enqueuer,
+		Model:    testModel,
+		Logger:   discardLogger(),
+	}))
 }
 
 // A bad request is rejected with 400 before any database work or enqueue
@@ -104,6 +103,7 @@ func TestChatRejectsInvalidRequests(t *testing.T) {
 // user's message stored, and nothing the worker owns written yet.
 func TestChatEnqueuesRun(t *testing.T) {
 	pool := testPool(t)
+	giveLLMKey(t, pool, devUserEmail)
 	ctx := context.Background()
 
 	enqueuer := &stubEnqueuer{}
@@ -207,6 +207,7 @@ func TestChatEnqueuesRun(t *testing.T) {
 // never answered.
 func TestChatFailedEnqueueRollsBackEverything(t *testing.T) {
 	pool := testPool(t)
+	giveLLMKey(t, pool, devUserEmail)
 
 	enqueuer := &stubEnqueuer{err: errStubDBQuery}
 	h := newChatRouter(pool, enqueuer)
@@ -231,6 +232,7 @@ func TestChatFailedEnqueueRollsBackEverything(t *testing.T) {
 // starting a new one.
 func TestChatContinuesExistingConversation(t *testing.T) {
 	pool := testPool(t)
+	giveLLMKey(t, pool, devUserEmail)
 
 	enqueuer := &stubEnqueuer{}
 	h := newChatRouter(pool, enqueuer)
@@ -270,6 +272,7 @@ func TestChatContinuesExistingConversation(t *testing.T) {
 // 202 and not a 500.
 func TestChatUnknownConversationIsClientError(t *testing.T) {
 	pool := testPool(t)
+	giveLLMKey(t, pool, devUserEmail)
 
 	enqueuer := &stubEnqueuer{}
 	h := newChatRouter(pool, enqueuer)

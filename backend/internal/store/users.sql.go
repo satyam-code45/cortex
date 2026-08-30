@@ -9,17 +9,62 @@ import (
 	"context"
 )
 
+const upsertGoogleUser = `-- name: UpsertGoogleUser :one
+INSERT INTO users (email, google_sub, name, avatar_url)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (email) DO UPDATE
+    SET google_sub = EXCLUDED.google_sub,
+        name       = EXCLUDED.name,
+        avatar_url = EXCLUDED.avatar_url
+RETURNING id, email, created_at, name, avatar_url, google_sub
+`
+
+type UpsertGoogleUserParams struct {
+	Email     string  `json:"email"`
+	GoogleSub *string `json:"google_sub"`
+	Name      *string `json:"name"`
+	AvatarUrl *string `json:"avatar_url"`
+}
+
+// Conflict on email, not google_sub: a pre-existing row (the dev user, say)
+// gains its Google identity on first login instead of duplicating the account.
+func (q *Queries) UpsertGoogleUser(ctx context.Context, arg UpsertGoogleUserParams) (User, error) {
+	row := q.db.QueryRow(ctx, upsertGoogleUser,
+		arg.Email,
+		arg.GoogleSub,
+		arg.Name,
+		arg.AvatarUrl,
+	)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.CreatedAt,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.GoogleSub,
+	)
+	return i, err
+}
+
 const upsertUser = `-- name: UpsertUser :one
 INSERT INTO users (email)
 VALUES ($1)
 ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
-RETURNING id, email, created_at
+RETURNING id, email, created_at, name, avatar_url, google_sub
 `
 
 // Idempotent by email: returns the existing row when the user already exists.
 func (q *Queries) UpsertUser(ctx context.Context, email string) (User, error) {
 	row := q.db.QueryRow(ctx, upsertUser, email)
 	var i User
-	err := row.Scan(&i.ID, &i.Email, &i.CreatedAt)
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.CreatedAt,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.GoogleSub,
+	)
 	return i, err
 }

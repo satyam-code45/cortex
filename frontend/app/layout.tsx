@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
+import { AppShell } from "@/components/nav/AppShell";
+
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -46,7 +48,7 @@ export default function RootLayout({
     >
       <body className="h-dvh bg-background text-foreground">
         <script dangerouslySetInnerHTML={{ __html: themeInit }} />
-        {children}
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

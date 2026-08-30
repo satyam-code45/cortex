@@ -387,7 +387,7 @@ func (o *Orchestrator) generateCitations(
 	request := llm.Request{Model: o.model, System: state.system, Messages: state.messages}
 
 	start := o.now()
-	resp, err := o.provider.GenerateStructured(callCtx, request, citationSchema)
+	resp, err := state.provider.GenerateStructured(callCtx, request, citationSchema)
 	latency := o.now().Sub(start)
 	if err != nil {
 		return llm.Response{}, &providerError{err: fmt.Errorf("citation generation: %w", err)}

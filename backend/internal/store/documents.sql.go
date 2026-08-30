@@ -8,6 +8,7 @@ package store
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -34,6 +35,71 @@ func (q *Queries) CountDocumentsBySource(ctx context.Context, source string) (in
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const countDocumentsFiltered = `-- name: CountDocumentsFiltered :many
+SELECT source, count(*) AS count
+FROM documents
+WHERE ($1::text IS NULL OR source = $1::text)
+  AND ($2::text IS NULL
+       OR title ILIKE '%' || $2::text || '%'
+       OR content ILIKE '%' || $2::text || '%')
+GROUP BY source
+`
+
+type CountDocumentsFilteredParams struct {
+	Source *string `json:"source"`
+	Query  *string `json:"query"`
+}
+
+type CountDocumentsFilteredRow struct {
+	Source string `json:"source"`
+	Count  int64  `json:"count"`
+}
+
+// Per-source tab counts under the same filters as ListDocuments, so the tabs
+// and the list never disagree.
+func (q *Queries) CountDocumentsFiltered(ctx context.Context, arg CountDocumentsFilteredParams) ([]CountDocumentsFilteredRow, error) {
+	rows, err := q.db.Query(ctx, countDocumentsFiltered, arg.Source, arg.Query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountDocumentsFilteredRow{}
+	for rows.Next() {
+		var i CountDocumentsFilteredRow
+		if err := rows.Scan(&i.Source, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getDocumentByID = `-- name: GetDocumentByID :one
+SELECT id, source, external_id, title, url, content, metadata, content_hash, source_timestamp, created_at, updated_at FROM documents WHERE id = $1
+`
+
+func (q *Queries) GetDocumentByID(ctx context.Context, id uuid.UUID) (Document, error) {
+	row := q.db.QueryRow(ctx, getDocumentByID, id)
+	var i Document
+	err := row.Scan(
+		&i.ID,
+		&i.Source,
+		&i.ExternalID,
+		&i.Title,
+		&i.Url,
+		&i.Content,
+		&i.Metadata,
+		&i.ContentHash,
+		&i.SourceTimestamp,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const getDocumentBySourceExternalID = `-- name: GetDocumentBySourceExternalID :one
@@ -63,6 +129,105 @@ func (q *Queries) GetDocumentBySourceExternalID(ctx context.Context, arg GetDocu
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listDocuments = `-- name: ListDocuments :many
+SELECT id, source, external_id, title, url, content, source_timestamp, updated_at
+FROM documents
+WHERE ($1::text IS NULL OR source = $1::text)
+  AND ($2::text IS NULL
+       OR title ILIKE '%' || $2::text || '%'
+       OR content ILIKE '%' || $2::text || '%')
+ORDER BY source_timestamp DESC NULLS LAST, id
+LIMIT $4 OFFSET $3
+`
+
+type ListDocumentsParams struct {
+	Source *string `json:"source"`
+	Query  *string `json:"query"`
+	Offset int32   `json:"offset_"`
+	Limit  int32   `json:"limit_"`
+}
+
+type ListDocumentsRow struct {
+	ID              uuid.UUID          `json:"id"`
+	Source          string             `json:"source"`
+	ExternalID      string             `json:"external_id"`
+	Title           string             `json:"title"`
+	Url             string             `json:"url"`
+	Content         string             `json:"content"`
+	SourceTimestamp pgtype.Timestamptz `json:"source_timestamp"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+// The Sources view listing. Both filters are optional (NULL disables them);
+// ILIKE over title/content is deliberate — 121 docs need no FTS index, and the
+// snippet windowing happens in Go where it can be rune-safe.
+func (q *Queries) ListDocuments(ctx context.Context, arg ListDocumentsParams) ([]ListDocumentsRow, error) {
+	rows, err := q.db.Query(ctx, listDocuments,
+		arg.Source,
+		arg.Query,
+		arg.Offset,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDocumentsRow{}
+	for rows.Next() {
+		var i ListDocumentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Source,
+			&i.ExternalID,
+			&i.Title,
+			&i.Url,
+			&i.Content,
+			&i.SourceTimestamp,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const sourceLastIndexed = `-- name: SourceLastIndexed :many
+SELECT source, max(updated_at)::timestamptz AS last_indexed
+FROM documents
+GROUP BY source
+`
+
+type SourceLastIndexedRow struct {
+	Source      string             `json:"source"`
+	LastIndexed pgtype.Timestamptz `json:"last_indexed"`
+}
+
+// Last content change per source (updated_at only moves when content_hash
+// changes) — distinct from "last refreshed", which comes from River job rows.
+func (q *Queries) SourceLastIndexed(ctx context.Context) ([]SourceLastIndexedRow, error) {
+	rows, err := q.db.Query(ctx, sourceLastIndexed)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SourceLastIndexedRow{}
+	for rows.Next() {
+		var i SourceLastIndexedRow
+		if err := rows.Scan(&i.Source, &i.LastIndexed); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const upsertDocument = `-- name: UpsertDocument :one

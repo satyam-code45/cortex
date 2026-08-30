@@ -104,14 +104,19 @@ type traceBody struct {
 	} `json:"citations"`
 }
 
+// traceTestAPIToken authenticates trace requests; the bearer path acts as the
+// router's BearerEmail, which is how these tests choose whose runs they see.
+const traceTestAPIToken = "trace-test-token"
+
 // traceRouter builds the real router against the test pool, acting as the user
 // that owns the run.
 func traceRouter(pool *pgxpool.Pool, email string) http.Handler {
 	return api.NewRouter(api.Deps{
-		DB:           pool,
-		Model:        testModel,
-		DevUserEmail: email,
-		Logger:       discardLogger(),
+		DB:          pool,
+		Model:       testModel,
+		APIToken:    traceTestAPIToken,
+		BearerEmail: email,
+		Logger:      discardLogger(),
 	})
 }
 
@@ -120,6 +125,7 @@ func getTrace(t *testing.T, h http.Handler, runID string) *httptest.ResponseReco
 	req := httptest.NewRequest(http.MethodGet, "/api/runs/"+runID+"/trace", nil)
 	// The host check rejects anything a real browser would not have dialled.
 	req.Host = "localhost:8080"
+	req.Header.Set("Authorization", "Bearer "+traceTestAPIToken)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec

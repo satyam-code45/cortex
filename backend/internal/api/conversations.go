@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"cortex/internal/auth"
 	"cortex/internal/store"
 )
 
@@ -33,8 +34,8 @@ type messageResponse struct {
 	CreatedAt  time.Time  `json:"created_at"`
 }
 
-// handleListConversations lists the dev user's conversations, newest-updated
-// first.
+// handleListConversations lists the signed-in user's conversations,
+// newest-updated first.
 //
 // GET /api/conversations → 200 [{"id","title","created_at","updated_at"}]
 func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request) {
@@ -42,9 +43,8 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 	ctx := r.Context()
 
 	q := store.New(s.deps.DB)
-	user, err := q.UpsertUser(ctx, s.deps.DevUserEmail)
-	if err != nil {
-		logger.Error("conversations: failed to resolve user", "error", err)
+	user, ok := auth.UserFrom(ctx)
+	if !ok {
 		writeError(w, logger, http.StatusInternalServerError, "failed to list conversations")
 		return
 	}
@@ -87,9 +87,8 @@ func (s *Server) handleListConversationMessages(w http.ResponseWriter, r *http.R
 	}
 
 	q := store.New(s.deps.DB)
-	user, err := q.UpsertUser(ctx, s.deps.DevUserEmail)
-	if err != nil {
-		logger.Error("messages: failed to resolve user", "error", err)
+	user, ok := auth.UserFrom(ctx)
+	if !ok {
 		writeError(w, logger, http.StatusInternalServerError, "failed to list messages")
 		return
 	}

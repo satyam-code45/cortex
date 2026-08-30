@@ -115,6 +115,15 @@ type RunEvent struct {
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
+type Session struct {
+	ID         uuid.UUID          `json:"id"`
+	UserID     uuid.UUID          `json:"user_id"`
+	TokenHash  []byte             `json:"token_hash"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+	LastSeenAt pgtype.Timestamptz `json:"last_seen_at"`
+}
+
 type ToolCall struct {
 	ID            uuid.UUID          `json:"id"`
 	AgentRunID    uuid.UUID          `json:"agent_run_id"`
@@ -133,4 +142,16 @@ type User struct {
 	ID        uuid.UUID          `json:"id"`
 	Email     string             `json:"email"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	Name      *string            `json:"name"`
+	AvatarUrl *string            `json:"avatar_url"`
+	GoogleSub *string            `json:"google_sub"`
+}
+
+type UserLlmKey struct {
+	UserID        uuid.UUID          `json:"user_id"`
+	Provider      string             `json:"provider"`
+	KeyCiphertext []byte             `json:"key_ciphertext"`
+	KeyLast4      string             `json:"key_last4"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }

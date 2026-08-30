@@ -8,12 +8,15 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"cortex/internal/auth"
+	"cortex/internal/keys"
 	"cortex/internal/store"
 )
 
@@ -43,6 +46,10 @@ type Enqueuer interface {
 	// transaction: the admin endpoint writes no rows of its own, so there is
 	// nothing for the enqueue to commit alongside.
 	EnqueueIndexSource(ctx context.Context, source string) error
+
+	// NewestFinalizedIndexJob reports when the most recent index job finished,
+	// and whether any has. It drives the Sources refresh cooldown.
+	NewestFinalizedIndexJob(ctx context.Context) (finishedAt time.Time, ok bool, err error)
 }
 
 // Deps are the collaborators the handlers need.
@@ -56,8 +63,6 @@ type Deps struct {
 	Enqueuer Enqueuer
 	// Model is the model name recorded on runs.
 	Model string
-	// DevUserEmail identifies the single hardcoded user; real auth lands later.
-	DevUserEmail string
 	// IndexSources are the source names POST /api/admin/index accepts. Empty
 	// disables the endpoint, which is what a build with no indexer wants.
 	IndexSources []string
@@ -66,6 +71,30 @@ type Deps struct {
 	FrontendOrigin string
 	// Logger receives request and handler logs.
 	Logger *slog.Logger
+
+	// OIDC drives Google sign-in.
+	OIDC *auth.OIDC
+	// Keys stores and reports users' LLM keys.
+	Keys *keys.Service
+	// APIToken is the static bearer token for non-browser callers. Empty
+	// disables bearer auth entirely (the comparison can never succeed).
+	APIToken string
+	// BearerEmail is the user the bearer token acts as (DEV_USER_EMAIL).
+	BearerEmail string
+	// AllowedEmails, when non-empty, restricts sign-in to these addresses
+	// (lowercase).
+	AllowedEmails []string
+	// AdminEmails are the session emails admitted to admin endpoints.
+	AdminEmails []string
+	// RunsPerUserPerHour caps run creation per user; 0 disables the limit
+	// (tests), production always sets it.
+	RunsPerUserPerHour int
+	// IndexRefreshCooldown is the minimum interval between user-triggered
+	// Sources refreshes.
+	IndexRefreshCooldown time.Duration
+	// OpenAIBaseURL overrides the endpoint key validation calls; tests point
+	// it at an httptest server.
+	OpenAIBaseURL string
 }
 
 // Server holds the handler dependencies.
@@ -97,12 +126,25 @@ func NewRouter(deps Deps) http.Handler {
 		// dev server on port 3000) to queue paid indexing crawls. curl and
 		// make index are unaffected — CORS binds browsers, not clients.
 		r.Use(corsMiddleware(deps.FrontendOrigin, "/api/admin/index"))
+		// Auth runs after CORS: preflights carry no cookies, so an auth-first
+		// ordering would 401 every OPTIONS and shut browsers out entirely.
+		r.Use(s.requireAuth)
+		r.Get("/auth/google/login", s.handleGoogleLogin)
+		r.Get("/auth/google/callback", s.handleGoogleCallback)
+		r.Post("/auth/logout", s.handleLogout)
+		r.Get("/auth/me", s.handleMe)
 		r.Post("/chat", s.handleChat)
 		r.Get("/runs/{id}", s.handleGetRun)
 		r.Get("/runs/{id}/events", s.handleRunEvents)
 		r.Get("/runs/{id}/trace", s.handleGetRunTrace)
 		r.Get("/conversations", s.handleListConversations)
 		r.Get("/conversations/{id}/messages", s.handleListConversationMessages)
+		r.Get("/settings/llm-key", s.handleGetLLMKey)
+		r.Put("/settings/llm-key", s.handlePutLLMKey)
+		r.Delete("/settings/llm-key", s.handleDeleteLLMKey)
+		r.Get("/documents", s.handleListDocuments)
+		r.Get("/documents/{id}", s.handleGetDocument)
+		r.Post("/documents/refresh", s.handleRefreshDocuments)
 		r.Post("/admin/index", s.handleAdminIndex)
 	})
 	return r

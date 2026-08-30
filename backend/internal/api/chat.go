@@ -7,14 +7,24 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
+	"cortex/internal/auth"
 	"cortex/internal/llm"
 	"cortex/internal/store"
 )
+
+// errLLMKeyRequired means the user has no stored LLM key; the handler maps it
+// to 409 {"error":"llm_key_required"} and the frontend routes that to settings.
+var errLLMKeyRequired = errors.New("llm key required")
+
+// errRunLimitExceeded means the user hit RUNS_PER_USER_PER_HOUR; mapped to 429.
+var errRunLimitExceeded = errors.New("run limit exceeded")
 
 const (
 	// maxTitleRunes caps the conversation title derived from the first message.
@@ -114,12 +124,19 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	queued, err := s.enqueueRun(ctx, conversationID, message)
 	if err != nil {
 		var notFound *conversationNotFoundError
-		if errors.As(err, &notFound) {
+		switch {
+		case errors.As(err, &notFound):
 			writeError(w, logger, http.StatusNotFound, "conversation not found")
-			return
+		case errors.Is(err, errLLMKeyRequired):
+			// The exact body the frontend's API client routes to settings on.
+			writeError(w, logger, http.StatusConflict, "llm_key_required")
+		case errors.Is(err, errRunLimitExceeded):
+			writeError(w, logger, http.StatusTooManyRequests,
+				fmt.Sprintf("run limit reached (%d per hour) — try again later", s.deps.RunsPerUserPerHour))
+		default:
+			logger.Error("chat: failed to enqueue run", "error", err)
+			writeError(w, logger, http.StatusInternalServerError, "failed to enqueue run")
 		}
-		logger.Error("chat: failed to enqueue run", "error", err)
-		writeError(w, logger, http.StatusInternalServerError, "failed to enqueue run")
 		return
 	}
 
@@ -169,9 +186,38 @@ func (s *Server) enqueueRun(ctx context.Context, conversationID *uuid.UUID, mess
 
 	q := store.New(tx)
 
-	user, err := q.UpsertUser(ctx, s.deps.DevUserEmail)
-	if err != nil {
-		return queuedRun{}, fmt.Errorf("upsert dev user: %w", err)
+	user, ok := auth.UserFrom(ctx)
+	if !ok {
+		return queuedRun{}, errors.New("no authenticated user in context")
+	}
+
+	// BYOK (REQ-7.2): a run without a stored key would only fail in the worker,
+	// after a row and a job exist — check at enqueue time so a keyless user
+	// gets a 409 and nothing is created. The worker still decrypts at execution
+	// time; this is the fail-fast, not the source of truth.
+	if _, err := q.GetUserLLMKey(ctx, user.ID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return queuedRun{}, errLLMKeyRequired
+		}
+		return queuedRun{}, fmt.Errorf("check llm key: %w", err)
+	}
+
+	// Per-user rate limit (REQ-7.3): the LLM spend is the user's own key, but
+	// every run also consumes the server's Jira/Notion/Gmail quotas. The count
+	// is not serializable with the insert below, so two concurrent requests can
+	// both pass at N-1 — acceptable for a courtesy limit; the hard costs are
+	// bounded by MAX_ITERATIONS per run anyway.
+	if s.deps.RunsPerUserPerHour > 0 {
+		count, err := q.CountUserRunsSince(ctx, store.CountUserRunsSinceParams{
+			UserID:    user.ID,
+			CreatedAt: pgtype.Timestamptz{Time: time.Now().Add(-time.Hour).UTC(), Valid: true},
+		})
+		if err != nil {
+			return queuedRun{}, fmt.Errorf("count user runs: %w", err)
+		}
+		if count >= int64(s.deps.RunsPerUserPerHour) {
+			return queuedRun{}, errRunLimitExceeded
+		}
 	}
 
 	var conversation store.Conversation

@@ -31,6 +31,7 @@ func truncateRiverJobs(t *testing.T, pool *pgxpool.Pool) {
 
 func TestChatEnqueuesThroughRiver(t *testing.T) {
 	pool := testPool(t)
+	giveLLMKey(t, pool, devUserEmail)
 	truncateRiverJobs(t, pool)
 	ctx := context.Background()
 
@@ -39,13 +40,12 @@ func TestChatEnqueuesThroughRiver(t *testing.T) {
 		t.Fatalf("build queue: %v", err)
 	}
 
-	h := api.NewRouter(api.Deps{
-		DB:           pool,
-		Enqueuer:     queue,
-		Model:        testModel,
-		DevUserEmail: devUserEmail,
-		Logger:       discardLogger(),
-	})
+	h := api.NewRouter(withTestAuth(api.Deps{
+		DB:       pool,
+		Enqueuer: queue,
+		Model:    testModel,
+		Logger:   discardLogger(),
+	}))
 
 	rec := postChat(t, h, `{"message":"which Atlas issues are blocked?"}`)
 	if rec.Code != http.StatusAccepted {
@@ -83,19 +83,19 @@ func TestChatEnqueuesThroughRiver(t *testing.T) {
 // A rejected request must leave the queue untouched, not just the tables.
 func TestChatRejectedRequestEnqueuesNothingInRiver(t *testing.T) {
 	pool := testPool(t)
+	giveLLMKey(t, pool, devUserEmail)
 	truncateRiverJobs(t, pool)
 
 	queue, err := jobs.New(jobs.Config{Pool: pool, Logger: discardLogger()})
 	if err != nil {
 		t.Fatalf("build queue: %v", err)
 	}
-	h := api.NewRouter(api.Deps{
-		DB:           pool,
-		Enqueuer:     queue,
-		Model:        testModel,
-		DevUserEmail: devUserEmail,
-		Logger:       discardLogger(),
-	})
+	h := api.NewRouter(withTestAuth(api.Deps{
+		DB:       pool,
+		Enqueuer: queue,
+		Model:    testModel,
+		Logger:   discardLogger(),
+	}))
 
 	rec := postChat(t, h, `{"conversation_id":"`+uuid.NewString()+`","message":"hello"}`)
 	if rec.Code < 400 || rec.Code >= 500 {

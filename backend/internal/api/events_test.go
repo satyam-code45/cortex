@@ -133,7 +133,12 @@ func TestRunEventsStreamsLiveAndClosesOnRunFinished(t *testing.T) {
 	srv := httptest.NewServer(newChatRouter(pool, &stubEnqueuer{}))
 	t.Cleanup(srv.Close)
 
-	resp, err := http.Get(srv.URL + "/api/runs/" + runID.String() + "/events")
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/api/runs/"+runID.String()+"/events", nil)
+	if err != nil {
+		t.Fatalf("build events request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+testAPIToken)
+	resp, err := srv.Client().Do(req)
 	if err != nil {
 		t.Fatalf("GET events: %v", err)
 	}

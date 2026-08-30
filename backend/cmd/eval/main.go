@@ -38,6 +38,7 @@ func main() {
 func run(logger *slog.Logger) error {
 	concurrency := flag.Int("concurrency", 4, "cases run in parallel")
 	caseID := flag.String("case", "", "run only the case with this id")
+	userEmail := flag.String("user", "eval@cortex.local", "email owning the eval's conversations")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -50,7 +51,9 @@ func run(logger *slog.Logger) error {
 
 	// The full server graph, credentials included: the eval runs the real
 	// agent against live sources, or it is not measuring the product.
-	deps, err := app.Build(ctx, cfg, logger)
+	// BYOK stays off: the eval is a server-initiated operation, so it runs on
+	// the server's key — never a user's.
+	deps, err := app.Build(ctx, cfg, logger, app.Options{})
 	if err != nil {
 		return err
 	}
@@ -89,6 +92,7 @@ func run(logger *slog.Logger) error {
 		Grader:       grader,
 		Model:        cfg.LLMModel,
 		Concurrency:  *concurrency,
+		UserEmail:    *userEmail,
 		Logger:       logger,
 	})
 	if err != nil {
@@ -111,17 +115,39 @@ func run(logger *slog.Logger) error {
 	// Only a full-suite run earns an eval_runs row: the table exists to show
 	// regressions across runs, and a -case row (1 case, most metrics absent)
 	// would sit in that trend indistinguishable from a collapsed full pass.
-	if *caseID == "" {
+	// A run where every case failed without a single tool call measured the
+	// provider's availability, not the agent — the JSONL keeps the evidence,
+	// but the trend table must not carry a 0-score row (EVAL-6.A).
+	switch {
+	case *caseID != "":
+		logger.Info("eval: single-case run not persisted to eval_runs", "case", *caseID)
+	case isProviderOutage(results):
+		logger.Warn("eval: every case failed with zero tool calls — provider outage, not persisting to eval_runs")
+	default:
 		if err := eval.Persist(ctx, deps.Pool, sha, startedAt, summary); err != nil {
 			return err
 		}
-	} else {
-		logger.Info("eval: single-case run not persisted to eval_runs", "case", *caseID)
 	}
 
 	fmt.Printf("\neval: %d cases, git %s, results %s\n\n", summary.Cases, sha, path)
 	fmt.Println(summary.Render())
 	return nil
+}
+
+// isProviderOutage reports whether a run's failures are wholly infrastructure:
+// every case failed before making a single tool call. Graded answers — even
+// bad ones — always leave tool calls behind, so this shape means the LLM
+// provider was down, not that the agent regressed.
+func isProviderOutage(results []eval.CaseResult) bool {
+	if len(results) == 0 {
+		return false
+	}
+	for _, r := range results {
+		if r.Status != "failed" || r.ToolCalls != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // gitSHA identifies the commit under evaluation. `make eval` always runs

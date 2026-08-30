@@ -13,16 +13,24 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"cortex/internal/api"
+	"cortex/internal/auth"
 )
 
 const devUserEmail = "dev@cortex.local"
+
+// testAPIToken is the static bearer token test routers accept. Most tests
+// authenticate with it (the operator credential — make index, scripts); the
+// session-cookie path has its own tests.
+const testAPIToken = "test-api-token"
 
 // stubEnqueuer is a hand-written api.Enqueuer: no mocking framework, the locked
 // stack has no test dependencies.
@@ -36,6 +44,10 @@ type stubEnqueuer struct {
 	err     error
 	runIDs  []uuid.UUID
 	indexed []string
+
+	// lastIndexFinishedAt configures NewestFinalizedIndexJob; the zero value
+	// means no index job has ever finished (no cooldown).
+	lastIndexFinishedAt time.Time
 }
 
 var _ api.Enqueuer = (*stubEnqueuer)(nil)
@@ -54,6 +66,12 @@ func (s *stubEnqueuer) EnqueueIndexSource(_ context.Context, source string) erro
 	defer s.mu.Unlock()
 	s.indexed = append(s.indexed, source)
 	return s.err
+}
+
+func (s *stubEnqueuer) NewestFinalizedIndexJob(_ context.Context) (time.Time, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastIndexFinishedAt, !s.lastIndexFinishedAt.IsZero(), nil
 }
 
 func (s *stubEnqueuer) callCount() int {
@@ -102,8 +120,41 @@ func (d *stubDB) Query(_ context.Context, _ string, _ ...any) (pgx.Rows, error) 
 	return nil, errStubDBQuery
 }
 
-func (d *stubDB) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row {
+func (d *stubDB) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
+	// The one query the bearer-auth middleware makes before any handler runs.
+	// Answering it — and only it — keeps stubDB usable for tests that assert a
+	// request is rejected before real database work.
+	if strings.Contains(sql, "INSERT INTO users") {
+		email := devUserEmail
+		if len(args) == 1 {
+			if s, ok := args[0].(string); ok {
+				email = s
+			}
+		}
+		return userRow{email: email}
+	}
 	return errRow{}
+}
+
+// stubUserID is the fixed id userRow scans; tests that care which user acted
+// can compare against it.
+var stubUserID = uuid.MustParse("00000000-0000-0000-0000-00000000d0d0")
+
+// userRow satisfies the UpsertUser scan (id, email, created_at, name,
+// avatar_url, google_sub).
+type userRow struct{ email string }
+
+func (r userRow) Scan(dest ...any) error {
+	if len(dest) != 6 {
+		return fmt.Errorf("userRow: %d scan destinations, want 6", len(dest))
+	}
+	*(dest[0].(*uuid.UUID)) = stubUserID
+	*(dest[1].(*string)) = r.email
+	*(dest[2].(*pgtype.Timestamptz)) = pgtype.Timestamptz{Time: time.Unix(0, 0).UTC(), Valid: true}
+	*(dest[3].(**string)) = nil
+	*(dest[4].(**string)) = nil
+	*(dest[5].(**string)) = nil
+	return nil
 }
 
 // errStubDBQuery is returned by every stubDB query path.
@@ -115,16 +166,80 @@ type errRow struct{}
 
 func (errRow) Scan(_ ...any) error { return errStubDBQuery }
 
-// localRequest builds a request that carries a Host the server answers to.
+// localRequest builds a request that carries a Host the server answers to and
+// the test bearer token.
 //
 // httptest.NewRequest defaults Host to "example.com", which the hostCheck
 // middleware correctly rejects with 421. Real clients dial localhost, so tests
 // have to as well — otherwise every test would be exercising the rebinding
-// guard instead of the handler it is about.
+// guard instead of the handler it is about. The bearer default is the same
+// idea for auth: a test about a handler must not be exercising the 401 path
+// instead; auth's own tests build unauthenticated requests deliberately.
 func localRequest(method, target string, body io.Reader) *http.Request {
 	req := httptest.NewRequest(method, target, body)
 	req.Host = "localhost:8080"
+	req.Header.Set("Authorization", "Bearer "+testAPIToken)
 	return req
+}
+
+// anonymousRequest is localRequest without credentials, for tests about the
+// 401 path itself.
+func anonymousRequest(method, target string, body io.Reader) *http.Request {
+	req := localRequest(method, target, body)
+	req.Header.Del("Authorization")
+	return req
+}
+
+// withTestAuth fills the auth-related Deps every test router needs: bearer
+// auth on, acting as the dev user.
+func withTestAuth(deps api.Deps) api.Deps {
+	deps.APIToken = testAPIToken
+	deps.BearerEmail = devUserEmail
+	return deps
+}
+
+// giveLLMKey stores a (fake-ciphertext) LLM key row for email, so POST
+// /api/chat passes the BYOK existence check. The bytes only matter to the
+// worker's decrypt path, which these handler tests never reach.
+func giveLLMKey(t *testing.T, pool *pgxpool.Pool, email string) {
+	t.Helper()
+	ctx := context.Background()
+	var userID uuid.UUID
+	if err := pool.QueryRow(ctx,
+		"INSERT INTO users (email) VALUES ($1) ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email RETURNING id",
+		email).Scan(&userID); err != nil {
+		t.Fatalf("insert user %s: %v", email, err)
+	}
+	if _, err := pool.Exec(ctx,
+		"INSERT INTO user_llm_keys (user_id, provider, key_ciphertext, key_last4) VALUES ($1, 'openai', '\\x00'::bytea, '0000') ON CONFLICT (user_id) DO NOTHING",
+		userID); err != nil {
+		t.Fatalf("insert llm key for %s: %v", email, err)
+	}
+}
+
+// createSessionForEmail inserts a user and a live session directly, returning
+// the cookie a browser would hold and the user's id. It goes through
+// auth.NewSessionToken so the hash-only-in-DB invariant is what's exercised.
+func createSessionForEmail(t *testing.T, pool *pgxpool.Pool, email string) (*http.Cookie, uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+
+	var userID uuid.UUID
+	if err := pool.QueryRow(ctx,
+		"INSERT INTO users (email) VALUES ($1) ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email RETURNING id",
+		email).Scan(&userID); err != nil {
+		t.Fatalf("insert user %s: %v", email, err)
+	}
+	token, hash, err := auth.NewSessionToken()
+	if err != nil {
+		t.Fatalf("mint session token: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		"INSERT INTO sessions (user_id, token_hash, expires_at) VALUES ($1, $2, now() + interval '1 hour')",
+		userID, hash); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+	return &http.Cookie{Name: auth.SessionCookieName, Value: token}, userID
 }
 
 // discardLogger keeps test output readable; handlers log errors on purpose.

@@ -33,6 +33,15 @@ var envKeys = []string{
 	"GMAIL_CREDENTIALS_JSON",
 	"GMAIL_TOKEN_PATH",
 	"GMAIL_QUERY_SCOPE",
+	"GOOGLE_OAUTH_CLIENT_ID",
+	"GOOGLE_OAUTH_CLIENT_SECRET",
+	"AUTH_ALLOWED_EMAILS",
+	"AUTH_API_TOKEN",
+	"ADMIN_EMAILS",
+	"DEV_USER_EMAIL",
+	"LLM_KEY_ENCRYPTION_SECRET",
+	"RUNS_PER_USER_PER_HOUR",
+	"INDEX_REFRESH_COOLDOWN",
 }
 
 const (
@@ -44,6 +53,14 @@ const (
 
 	testNotionToken    = "ntn-test-token"
 	testGmailCredsPath = "./testdata/gmail-credentials.json"
+
+	// Day 7 required vars.
+	testGmailQueryScope  = "label:vantage-labs"
+	testJiraProjectsPin  = "ATLAS"
+	testGoogleClientID   = "test-client.apps.googleusercontent.com"
+	testGoogleSecret     = "google-test-secret"
+	testAuthAPIToken     = "auth-test-token"
+	testEncryptionSecret = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 )
 
 // requiredEnv is the minimum set that lets Load succeed, so a case can state
@@ -61,7 +78,53 @@ func requiredEnv() map[string]string {
 		// evidence missing.
 		"NOTION_TOKEN":           testNotionToken,
 		"GMAIL_CREDENTIALS_JSON": testGmailCredsPath,
+		// Required from Day 7 (REQ-7.1/7.3): sign-in credentials, operator
+		// bearer token, key-encryption secret, and the source pins that keep an
+		// authenticated stranger inside the demo workspace.
+		"GMAIL_QUERY_SCOPE":          testGmailQueryScope,
+		"JIRA_PROJECTS":              testJiraProjectsPin,
+		"GOOGLE_OAUTH_CLIENT_ID":     testGoogleClientID,
+		"GOOGLE_OAUTH_CLIENT_SECRET": testGoogleSecret,
+		"AUTH_API_TOKEN":             testAuthAPIToken,
+		"LLM_KEY_ENCRYPTION_SECRET":  testEncryptionSecret,
 	}
+}
+
+// withDay7Want fills the Day 7 fields a pre-existing want literal leaves at
+// their zero value: every case built on requiredEnv() gets the same required
+// values and defaults, and only a case that varies one of them states it.
+func withDay7Want(want config.Config) config.Config {
+	if want.GmailQueryScope == "" {
+		want.GmailQueryScope = testGmailQueryScope
+	}
+	if want.JiraProjects == nil {
+		want.JiraProjects = []string{testJiraProjectsPin}
+	}
+	if want.GoogleOAuthClientID == "" {
+		want.GoogleOAuthClientID = testGoogleClientID
+	}
+	if want.GoogleOAuthClientSecret == "" {
+		want.GoogleOAuthClientSecret = testGoogleSecret
+	}
+	if want.AuthAPIToken == "" {
+		want.AuthAPIToken = testAuthAPIToken
+	}
+	if want.LLMKeyEncryptionSecret == "" {
+		want.LLMKeyEncryptionSecret = testEncryptionSecret
+	}
+	if want.DevUserEmail == "" {
+		want.DevUserEmail = config.DefaultDevUserEmail
+	}
+	if want.AdminEmails == nil {
+		want.AdminEmails = []string{want.DevUserEmail}
+	}
+	if want.RunsPerUserPerHour == 0 {
+		want.RunsPerUserPerHour = config.DefaultRunsPerUserPerHour
+	}
+	if want.IndexRefreshCooldown == 0 {
+		want.IndexRefreshCooldown = config.DefaultIndexRefreshCooldown
+	}
+	return want
 }
 
 // withEnv returns the required set with overrides applied.
@@ -92,7 +155,27 @@ func TestLoad(t *testing.T) {
 				"DATABASE_URL", "OPENAI_API_KEY",
 				"JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN",
 				"NOTION_TOKEN",
+				"GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET",
+				"AUTH_API_TOKEN", "LLM_KEY_ENCRYPTION_SECRET",
+				"GMAIL_QUERY_SCOPE", "JIRA_PROJECTS",
 			},
+		},
+		{
+			// The pins stopped being optional when sign-in opened (REQ-7.3); the
+			// error must say why, not just name the variable.
+			name:            "missing source pins are reported with their rationale",
+			env:             withEnv(map[string]string{"GMAIL_QUERY_SCOPE": "", "JIRA_PROJECTS": ""}),
+			wantErr:         true,
+			wantErrContains: []string{"GMAIL_QUERY_SCOPE", "JIRA_PROJECTS", "pins"},
+			wantErrOmits:    []string{"DATABASE_URL", "GOOGLE_OAUTH_CLIENT_ID"},
+		},
+		{
+			// A wrong-length key would otherwise surface as a crypto error on the
+			// first key save, far from the .env line that caused it.
+			name:            "malformed LLM_KEY_ENCRYPTION_SECRET is rejected at load",
+			env:             withEnv(map[string]string{"LLM_KEY_ENCRYPTION_SECRET": "not-hex"}),
+			wantErr:         true,
+			wantErrContains: []string{"LLM_KEY_ENCRYPTION_SECRET", "64 hex"},
 		},
 		{
 			name:            "missing DATABASE_URL only",
@@ -379,6 +462,7 @@ func TestLoad(t *testing.T) {
 			}
 			// DeepEqual rather than !=: Config gained a slice field
 			// (JiraProjects) and is no longer comparable.
+			tt.want = withDay7Want(tt.want)
 			if !reflect.DeepEqual(*cfg, tt.want) {
 				// Config implements Stringer with its secrets redacted, so this
 				// message cannot leak the API key or the Jira token.

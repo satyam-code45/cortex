@@ -11,6 +11,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -18,8 +19,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/google/uuid"
+
 	"cortex/internal/agent"
 	"cortex/internal/config"
+	"cortex/internal/keys"
 	"cortex/internal/llm"
 	"cortex/internal/rag"
 	"cortex/internal/tools"
@@ -31,10 +35,20 @@ import (
 // dbConnectTimeout bounds the startup connectivity check.
 const dbConnectTimeout = 10 * time.Second
 
+// Options selects per-command behavior of the shared graph.
+type Options struct {
+	// BYOK makes the orchestrator run each investigation on its owner's
+	// stored LLM key (cmd/server). Off — cmd/eval — every run uses the
+	// server's key: the eval is a server-initiated operation and must never
+	// borrow a user's key, in either direction.
+	BYOK bool
+}
+
 // Deps is the assembled graph. Every field is non-nil after a successful Build.
 type Deps struct {
 	Pool         *pgxpool.Pool
 	Provider     llm.Provider
+	Keys         *keys.Service
 	JiraClient   *jira.Client
 	NotionClient *notion.Client
 	GmailClient  *gmail.Client
@@ -45,14 +59,14 @@ type Deps struct {
 
 // Build connects to Postgres (with a ping check), constructs every source
 // client, and wires the orchestrator. The caller owns Close.
-func Build(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*Deps, error) {
+func Build(ctx context.Context, cfg *config.Config, logger *slog.Logger, opts Options) (*Deps, error) {
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("connect to database: %w", err)
 	}
 	// From here on, a failure must release the pool: Build owns it until it
 	// hands Deps back.
-	deps, err := build(ctx, pool, cfg, logger)
+	deps, err := build(ctx, pool, cfg, logger, opts)
 	if err != nil {
 		pool.Close()
 		return nil, err
@@ -65,7 +79,7 @@ func (d *Deps) Close() {
 	d.Pool.Close()
 }
 
-func build(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, logger *slog.Logger) (*Deps, error) {
+func build(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, logger *slog.Logger, opts Options) (*Deps, error) {
 	pingCtx, cancelPing := context.WithTimeout(ctx, dbConnectTimeout)
 	defer cancelPing()
 	if err := pool.Ping(pingCtx); err != nil {
@@ -154,7 +168,13 @@ func build(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, logger *
 		return nil, err
 	}
 
-	orchestrator, err := agent.New(agent.Config{
+	cipher, err := keys.NewCipher(cfg.LLMKeyEncryptionSecret)
+	if err != nil {
+		return nil, err
+	}
+	keyService := keys.NewService(pool, cipher)
+
+	agentConfig := agent.Config{
 		DB:                 pool,
 		Provider:           provider,
 		Registry:           registry,
@@ -163,7 +183,37 @@ func build(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, logger *
 		MaxIterations:      cfg.MaxIterations,
 		ContextTokenBudget: cfg.ContextTokenBudget,
 		Logger:             logger,
-	})
+	}
+	if opts.BYOK {
+		// The completion/embedding cut (REQ-7.2, amended spec): completions run
+		// on the run owner's key via this factory; embeddings — the indexer
+		// above and the knowledge_base query embedder below — stay on the
+		// server's `provider`, because they read the server's own index and the
+		// registry (with its per-upstream pacing state) is shared across runs.
+		agentConfig.ProviderForUser = func(ctx context.Context, userID uuid.UUID) (llm.Provider, error) {
+			userProvider, key, err := keyService.Get(ctx, userID)
+			// Only conditions that cannot heal on retry are marked
+			// ErrLLMKeyUnavailable (the orchestrator fails the run for those);
+			// a transient database error passes through plain, and River
+			// retries the job.
+			if errors.Is(err, keys.ErrNoKey) || errors.Is(err, keys.ErrUnusableKey) {
+				return nil, fmt.Errorf("%w: %w", agent.ErrLLMKeyUnavailable, err)
+			}
+			if err != nil {
+				return nil, err
+			}
+			if userProvider != "openai" {
+				return nil, fmt.Errorf("%w: provider %q is not implemented", agent.ErrLLMKeyUnavailable, userProvider)
+			}
+			return llm.NewOpenAI(llm.OpenAIConfig{
+				APIKey:         key,
+				BaseURL:        cfg.OpenAIBaseURL,
+				DefaultModel:   cfg.LLMModel,
+				EmbeddingModel: cfg.EmbeddingModel,
+			}), nil
+		}
+	}
+	orchestrator, err := agent.New(agentConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -171,6 +221,7 @@ func build(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, logger *
 	return &Deps{
 		Pool:         pool,
 		Provider:     provider,
+		Keys:         keyService,
 		JiraClient:   jiraClient,
 		NotionClient: notionClient,
 		GmailClient:  gmailClient,

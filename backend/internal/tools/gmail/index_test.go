@@ -43,7 +43,8 @@ func listBody(nextPageToken string, ids ...string) string {
 
 // The crawl must apply GMAIL_QUERY_SCOPE, and must apply it to the empty
 // "everything" query rather than skipping the narrowing when there is no query
-// of its own.
+// of its own. (There is no unscoped case: since Day 7 an unscoped client
+// refuses to construct — see TestNewClientRequiresQueryScope.)
 func TestIndexCrawlAppliesTheQueryScope(t *testing.T) {
 	t.Parallel()
 
@@ -52,13 +53,6 @@ func TestIndexCrawlAppliesTheQueryScope(t *testing.T) {
 		scope string
 		wantQ string
 	}{
-		{
-			// The default: a system that reads real data reaches the whole
-			// mailbox unless someone narrows it deliberately.
-			name:  "an unscoped crawl sends no query",
-			scope: "",
-			wantQ: "",
-		},
 		{
 			name:  "a scoped crawl confines itself to the label",
 			scope: "label:vantage-labs",
@@ -102,7 +96,7 @@ func TestIndexCrawlFollowsThePageCursor(t *testing.T) {
 		messagePath: fixtureRoute("message_full.json", "message_full.json"),
 	})
 
-	source := gmail.NewSource(f.client(""), 10, discardLogger())
+	source := gmail.NewSource(f.client(testQueryScope), 10, discardLogger())
 	documents, err := source.FetchAll(context.Background())
 	if err != nil {
 		t.Fatalf("FetchAll: %v", err)
@@ -154,7 +148,7 @@ func TestIndexCrawlStopsAtTheDocumentCap(t *testing.T) {
 		messagePath:      fixtureRoute("message_full.json"),
 	})
 
-	source := gmail.NewSource(f.client(""), 1, discardLogger())
+	source := gmail.NewSource(f.client(testQueryScope), 1, discardLogger())
 	documents, err := source.FetchAll(context.Background())
 	if err != nil {
 		t.Fatalf("FetchAll: %v", err)
@@ -184,7 +178,7 @@ func TestIndexCrawlSkipsAnUnreadableMessage(t *testing.T) {
 		messagePath: fixtureRoute("message_full.json"),
 	})
 
-	source := gmail.NewSource(f.client(""), 10, discardLogger())
+	source := gmail.NewSource(f.client(testQueryScope), 10, discardLogger())
 	documents, err := source.FetchAll(context.Background())
 	if err != nil {
 		t.Fatalf("FetchAll: %v", err)
@@ -205,7 +199,7 @@ func TestIndexCrawlOnAnEmptyMailbox(t *testing.T) {
 		messagesListPath: fixtureRoute("messages_empty.json"),
 	})
 
-	source := gmail.NewSource(f.client(""), 10, discardLogger())
+	source := gmail.NewSource(f.client(testQueryScope), 10, discardLogger())
 	documents, err := source.FetchAll(context.Background())
 	if err != nil {
 		t.Fatalf("FetchAll: %v", err)

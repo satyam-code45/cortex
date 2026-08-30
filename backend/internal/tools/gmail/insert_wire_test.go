@@ -18,7 +18,7 @@ func TestInsertMessageSendsInboxLabel(t *testing.T) {
 	fake := newFakeGmail(t, map[string]*route{
 		"/gmail/v1/users/me/messages": bodyRoute(200, `{"id":"18ff01","threadId":"18ff01"}`),
 	})
-	client := fake.client("")
+	client := fake.client(testQueryScope)
 
 	id, err := client.InsertMessage(context.Background(), gmail.FixtureMessage{
 		From:    "Ines Brandt <ines@nordwindpayments.example>",

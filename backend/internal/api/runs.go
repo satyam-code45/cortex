@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"cortex/internal/auth"
 	"cortex/internal/store"
 )
 
@@ -46,9 +47,8 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 
 	q := store.New(s.deps.DB)
 
-	user, err := q.UpsertUser(ctx, s.deps.DevUserEmail)
-	if err != nil {
-		logger.Error("runs: failed to resolve user", "error", err)
+	user, ok := auth.UserFrom(ctx)
+	if !ok {
 		writeError(w, logger, http.StatusInternalServerError, "failed to load run")
 		return
 	}

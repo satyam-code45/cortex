@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"cortex/internal/agent"
+	"cortex/internal/auth"
 	"cortex/internal/store"
 )
 
@@ -36,9 +37,8 @@ func (s *Server) handleGetRunTrace(w http.ResponseWriter, r *http.Request) {
 
 	q := store.New(s.deps.DB)
 
-	user, err := q.UpsertUser(ctx, s.deps.DevUserEmail)
-	if err != nil {
-		logger.Error("trace: failed to resolve user", "error", err)
+	user, ok := auth.UserFrom(ctx)
+	if !ok {
 		writeError(w, logger, http.StatusInternalServerError, "failed to load trace")
 		return
 	}

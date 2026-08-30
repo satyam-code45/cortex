@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const completeAgentRun = `-- name: CompleteAgentRun :one
@@ -55,6 +56,27 @@ func (q *Queries) CompleteAgentRun(ctx context.Context, arg CompleteAgentRunPara
 		&i.FinishedAt,
 	)
 	return i, err
+}
+
+const countUserRunsSince = `-- name: CountUserRunsSince :one
+SELECT count(*) FROM agent_runs r
+         JOIN conversations c ON c.id = r.conversation_id
+WHERE c.user_id = $1 AND r.created_at > $2
+`
+
+type CountUserRunsSinceParams struct {
+	UserID    uuid.UUID          `json:"user_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+// Per-user rate limit (REQ-7.3): the shared cost of a run is Satyam's upstream
+// API quotas even when the LLM spend is the user's. $2 is a timestamp rather
+// than a hardcoded interval so tests can pin the window.
+func (q *Queries) CountUserRunsSince(ctx context.Context, arg CountUserRunsSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countUserRunsSince, arg.UserID, arg.CreatedAt)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const failAgentRun = `-- name: FailAgentRun :one
@@ -125,6 +147,21 @@ func (q *Queries) GetAgentRunForUser(ctx context.Context, arg GetAgentRunForUser
 		&i.FinishedAt,
 	)
 	return i, err
+}
+
+const getAgentRunOwner = `-- name: GetAgentRunOwner :one
+SELECT c.user_id FROM agent_runs r
+         JOIN conversations c ON c.id = r.conversation_id
+WHERE r.id = $1
+`
+
+// Runs don't carry a user_id; ownership lives on the conversation. The worker
+// resolves the owner to build the run's LLM provider from their stored key.
+func (q *Queries) GetAgentRunOwner(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getAgentRunOwner, id)
+	var user_id uuid.UUID
+	err := row.Scan(&user_id)
+	return user_id, err
 }
 
 const insertAgentRun = `-- name: InsertAgentRun :one

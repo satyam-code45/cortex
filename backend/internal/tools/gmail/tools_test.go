@@ -97,9 +97,11 @@ func TestSearchMessagesFieldMappingAndEvidence(t *testing.T) {
 	if list[0].method != http.MethodGet {
 		t.Errorf("method = %s, want GET", list[0].method)
 	}
-	// REQ-3.2: Gmail query syntax passthrough, unset scope = whole mailbox.
-	if got := list[0].query.Get("q"); got != "from:nordwind.example refunds" {
-		t.Errorf("q = %q, want the tool's query verbatim (no scope configured)", got)
+	// REQ-3.2: Gmail query syntax passthrough — the tool's query survives
+	// verbatim inside the mandatory scope (REQ-7.3 made unscoped clients
+	// unconstructible).
+	if got, want := list[0].query.Get("q"), testQueryScope+" (from:nordwind.example refunds)"; got != want {
+		t.Errorf("q = %q, want %q", got, want)
 	}
 	if got := list[0].header.Get("Authorization"); got != "Bearer "+testAccessToken {
 		t.Errorf("Authorization = %q, want the bearer access token", got)
@@ -143,9 +145,9 @@ func TestSearchMessagesFieldMappingAndEvidence(t *testing.T) {
 		"Re: Nordwind v3 refunds sandbox: revised availability", "2026-06-15T16:40:00Z")
 }
 
-// REQ-3.2: GMAIL_QUERY_SCOPE is an optional narrowing. When set, every search
-// must be confined to it — and the user's own top-level OR must not be able to
-// escape, or a graded eval run could cite personal mail.
+// REQ-3.2 + REQ-7.3: every search is confined to GMAIL_QUERY_SCOPE — and the
+// user's own top-level OR must not be able to escape, or a signed-in stranger
+// could reach personal mail.
 func TestSearchMessagesAppliesQueryScope(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -153,12 +155,6 @@ func TestSearchMessagesAppliesQueryScope(t *testing.T) {
 		query string
 		wantQ string
 	}{
-		{
-			name:  "unset scope searches the whole mailbox",
-			scope: "",
-			query: "subject:refunds",
-			wantQ: "subject:refunds",
-		},
 		{
 			name:  "scope is ANDed into the query",
 			scope: "label:vantage-labs",
@@ -392,11 +388,28 @@ func TestGmailServerErrorIsRetryable(t *testing.T) {
 	}
 }
 
+// REQ-7.3: the scope pin is structural. A client that could search the whole
+// mailbox must be unconstructible, not merely unconfigured — with sign-in open,
+// configuration is the only thing between a stranger and the operator's mail.
+func TestNewClientRequiresQueryScope(t *testing.T) {
+	fake := newFakeGmail(t, map[string]*route{})
+	_, err := gmail.NewClient(gmail.Config{
+		TokenSource: fake.tokenSource(),
+		QueryScope:  "   ",
+	})
+	if err == nil {
+		t.Fatal("NewClient accepted an empty QueryScope")
+	}
+	if !strings.Contains(err.Error(), "QueryScope") {
+		t.Errorf("error %q does not name QueryScope", err)
+	}
+}
+
 // The Gmail tool set is exactly the two read-only tools REQ-3.2 names. The
 // agent must not be handed a way to send, label, or delete mail.
 func TestGmailToolSetIsReadOnly(t *testing.T) {
 	fake := newFakeGmail(t, map[string]*route{})
-	set := gmail.NewTools(fake.client(""))
+	set := gmail.NewTools(fake.client(testQueryScope))
 
 	got := make([]string, 0, len(set))
 	for _, tool := range set {

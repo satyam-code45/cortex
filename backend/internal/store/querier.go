@@ -17,17 +17,38 @@ type Querier interface {
 	// knowledge base, the second means rephrase.
 	CountDocuments(ctx context.Context) (int64, error)
 	CountDocumentsBySource(ctx context.Context, source string) (int64, error)
+	// Per-source tab counts under the same filters as ListDocuments, so the tabs
+	// and the list never disagree.
+	CountDocumentsFiltered(ctx context.Context, arg CountDocumentsFilteredParams) ([]CountDocumentsFilteredRow, error)
+	// Per-user rate limit (REQ-7.3): the shared cost of a run is Satyam's upstream
+	// API quotas even when the LLM spend is the user's. $2 is a timestamp rather
+	// than a hardcoded interval so tests can pin the window.
+	CountUserRunsSince(ctx context.Context, arg CountUserRunsSinceParams) (int64, error)
 	CreateConversation(ctx context.Context, arg CreateConversationParams) (Conversation, error)
+	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	DeleteChunksByDocument(ctx context.Context, documentID uuid.UUID) error
+	// Opportunistic housekeeping, called on login; there is no background sweeper.
+	DeleteExpiredSessions(ctx context.Context) (int64, error)
+	DeleteSessionByTokenHash(ctx context.Context, tokenHash []byte) (int64, error)
+	DeleteUserLLMKey(ctx context.Context, userID uuid.UUID) (int64, error)
 	FailAgentRun(ctx context.Context, arg FailAgentRunParams) (AgentRun, error)
 	// Ownership is enforced in the query, not in Go: GET /api/runs/{id} takes a
 	// caller-supplied UUID, and joining through conversations is what stops it
 	// being an IDOR the moment a second user exists.
 	GetAgentRunForUser(ctx context.Context, arg GetAgentRunForUserParams) (AgentRun, error)
+	// Runs don't carry a user_id; ownership lives on the conversation. The worker
+	// resolves the owner to build the run's LLM provider from their stored key.
+	GetAgentRunOwner(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	// Scoped by user_id on purpose: keeping the ownership predicate in the query
 	// means a future handler cannot forget the Go-side check and open an IDOR.
 	GetConversation(ctx context.Context, arg GetConversationParams) (Conversation, error)
+	GetDocumentByID(ctx context.Context, id uuid.UUID) (Document, error)
 	GetDocumentBySourceExternalID(ctx context.Context, arg GetDocumentBySourceExternalIDParams) (Document, error)
+	// The middleware's single lookup: session validity and the user in one query.
+	// Expiry is enforced here, not in Go, so a revoked-or-expired session and an
+	// unknown token are indistinguishable to the caller (both are no-rows).
+	GetSessionUserByTokenHash(ctx context.Context, tokenHash []byte) (GetSessionUserByTokenHashRow, error)
+	GetUserLLMKey(ctx context.Context, userID uuid.UUID) (UserLlmKey, error)
 	InsertAgentRun(ctx context.Context, arg InsertAgentRunParams) (AgentRun, error)
 	InsertCitation(ctx context.Context, arg InsertCitationParams) (Citation, error)
 	// The embedding arrives as pgvector's text form and is cast in SQL. Passing it
@@ -67,6 +88,10 @@ type Querier interface {
 	// [2], hence the cast.
 	ListCitationsByRun(ctx context.Context, agentRunID uuid.UUID) ([]ListCitationsByRunRow, error)
 	ListConversationsByUser(ctx context.Context, userID uuid.UUID) ([]Conversation, error)
+	// The Sources view listing. Both filters are optional (NULL disables them);
+	// ILIKE over title/content is deliberate — 121 docs need no FTS index, and the
+	// snippet windowing happens in Go where it can be rune-safe.
+	ListDocuments(ctx context.Context, arg ListDocumentsParams) ([]ListDocumentsRow, error)
 	ListEvalRuns(ctx context.Context) ([]EvalRun, error)
 	ListEvidenceByRun(ctx context.Context, agentRunID uuid.UUID) ([]Evidence, error)
 	ListMessagesByConversation(ctx context.Context, conversationID uuid.UUID) ([]Message, error)
@@ -87,18 +112,27 @@ type Querier interface {
 	// ordering is ascending. The operator must match the index's vector_cosine_ops
 	// or the planner silently ignores the index.
 	SearchDocumentChunks(ctx context.Context, arg SearchDocumentChunksParams) ([]SearchDocumentChunksRow, error)
+	// Last content change per source (updated_at only moves when content_hash
+	// changes) — distinct from "last refreshed", which comes from River job rows.
+	SourceLastIndexed(ctx context.Context) ([]SourceLastIndexedRow, error)
 	// Claims a queued run. The status guard makes the transition idempotent for a
 	// River job that is retried after a worker crash (still 'running'), while
 	// refusing to restart a run that already reached a terminal state — returning
 	// no rows is the signal to skip.
 	StartAgentRun(ctx context.Context, id uuid.UUID) (AgentRun, error)
 	TouchConversation(ctx context.Context, id uuid.UUID) error
+	TouchSession(ctx context.Context, id uuid.UUID) error
 	// Called only for documents whose content_hash actually changed (the indexer
 	// short-circuits before this on an unchanged hash), so the update branch always
 	// has work to do.
 	UpsertDocument(ctx context.Context, arg UpsertDocumentParams) (Document, error)
+	// Conflict on email, not google_sub: a pre-existing row (the dev user, say)
+	// gains its Google identity on first login instead of duplicating the account.
+	UpsertGoogleUser(ctx context.Context, arg UpsertGoogleUserParams) (User, error)
 	// Idempotent by email: returns the existing row when the user already exists.
 	UpsertUser(ctx context.Context, email string) (User, error)
+	// One key per user: replacing the key or switching provider is the same write.
+	UpsertUserLLMKey(ctx context.Context, arg UpsertUserLLMKeyParams) (UserLlmKey, error)
 }
 
 var _ Querier = (*Queries)(nil)

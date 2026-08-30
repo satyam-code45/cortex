@@ -24,13 +24,12 @@ func TestHealthz(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := api.NewRouter(api.Deps{
-				DB:           &stubDB{pingErr: tt.pingErr},
-				Enqueuer:     &stubEnqueuer{},
-				Model:        testModel,
-				DevUserEmail: devUserEmail,
-				Logger:       discardLogger(),
-			})
+			h := api.NewRouter(withTestAuth(api.Deps{
+				DB:       &stubDB{pingErr: tt.pingErr},
+				Enqueuer: &stubEnqueuer{},
+				Model:    testModel,
+				Logger:   discardLogger(),
+			}))
 
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, localRequest(http.MethodGet, "/healthz", nil))
@@ -55,7 +54,7 @@ func TestHealthz(t *testing.T) {
 // NewRouter must tolerate a nil logger (REQ-1.6 wiring); it falls back to the
 // default slog logger rather than panicking on the first request.
 func TestNewRouterWithNilLogger(t *testing.T) {
-	h := api.NewRouter(api.Deps{DB: &stubDB{}, Enqueuer: &stubEnqueuer{}, Model: testModel, DevUserEmail: devUserEmail})
+	h := api.NewRouter(withTestAuth(api.Deps{DB: &stubDB{}, Enqueuer: &stubEnqueuer{}, Model: testModel}))
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, localRequest(http.MethodGet, "/healthz", nil))

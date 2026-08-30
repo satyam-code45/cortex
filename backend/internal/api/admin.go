@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+
+	"cortex/internal/auth"
 )
 
 // maxAdminBodyBytes bounds the optional request body.
@@ -34,13 +36,22 @@ type indexResponse struct {
 // request. The work happens in the River workers, and `make index` is a curl at
 // this endpoint.
 //
-// There is no authentication here, as there is nowhere else in the API yet. What
-// keeps it closed is that the server binds loopback by default
-// (config.DefaultHost) — the same thing that keeps POST /api/chat, which spends
-// money on every call, from being reachable. Exposing the server on 0.0.0.0
-// before auth lands exposes this too.
+// Admin-gated (REQ-7.3): the bearer token qualifies, and so does a session
+// whose email is in ADMIN_EMAILS. Everyone else gets 403 — the user-facing
+// path to a reindex is POST /api/documents/refresh, which carries its own
+// cooldown instead of an admin check.
 func (s *Server) handleAdminIndex(w http.ResponseWriter, r *http.Request) {
 	logger := s.deps.Logger
+
+	user, ok := auth.UserFrom(r.Context())
+	if !ok {
+		writeError(w, logger, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if !user.IsAdmin {
+		writeError(w, logger, http.StatusForbidden, "admin access required")
+		return
+	}
 
 	if s.deps.Enqueuer == nil || len(s.deps.IndexSources) == 0 {
 		writeError(w, logger, http.StatusServiceUnavailable, "indexing is not configured on this server")
