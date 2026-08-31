@@ -16,14 +16,14 @@ import (
 	"cortex/internal/tools"
 )
 
-// TEST-6.4 — the context overflow guard (REQ-6.3 item 7, spec A6).
+// The context overflow guard.
 //
 // A long run over a small ContextTokenBudget must compact its OLDEST tool
 // observations into utility-model summaries while sparing the newest ones,
 // bring the transcript estimate back under budget before the next generation,
 // and record the rewrite as a context_compaction event carrying the full
 // replacement text — so ReconstructTranscript rebuilds the compacted
-// transcript exactly (the replay invariant of CLAUDE.md).
+// transcript exactly (the replay invariant).
 
 // compactionBudget is deliberately tiny next to the huge first observation and
 // comfortably above the system prompt plus the recent observations, so exactly
@@ -31,7 +31,7 @@ import (
 const compactionBudget = 6000
 
 // newCompactionOrchestrator builds an orchestrator with the small budget. The
-// tool-content cap is raised so the per-result summarizer (Day 2) stays out of
+// tool-content cap is raised so the per-result summarizer stays out of
 // the way: this test is about the transcript-level guard.
 func newCompactionOrchestrator(t *testing.T, pool *pgxpool.Pool, provider llm.Provider, registry *tools.Registry) *agent.Orchestrator {
 	t.Helper()

@@ -18,8 +18,8 @@ import (
 // GET /api/runs/{id}/trace → 200 {query, status, totals, timeline, tool_calls,
 // evidence, citations}
 //
-// This is the observability endpoint (idea.md §15) and the backend half of
-// Day 5's trace panel: it answers "why did the agent say that?" with the
+// This is the observability endpoint and the backend half of
+// the live trace panel: it answers "why did the agent say that?" with the
 // transcript, the tool arguments and latencies, the evidence, and the mapping
 // from each [n] marker in the answer to the source behind it.
 //

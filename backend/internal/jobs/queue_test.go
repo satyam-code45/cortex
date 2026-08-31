@@ -17,9 +17,9 @@ import (
 	"cortex/internal/jobs"
 )
 
-// TEST-2.4 — enqueue transactionality.
+// Enqueue transactionality.
 //
-// REQ-2.4 requires the chat insert and the enqueue to commit or roll back
+// The chat insert and the enqueue must commit or roll back
 // together. That is not a property of our code so much as a property of River's
 // InsertTx writing the job row in *our* transaction, so it has to be tested
 // against a real Postgres with River's schema applied (`make migrate-test`),

@@ -13,9 +13,9 @@ import (
 	"cortex/internal/connections"
 )
 
-// TEST-8.1 — connections storage (REQ-8.1).
+// Connections storage.
 //
-// The invariants under test are the spec's: what the database holds for a
+// The invariants under test: what the database holds for a
 // connection is ciphertext (round-trippable under the configured secret, never
 // the plaintext), identity carries display facts only, (user_id, source) is
 // unique, delete removes the row, and a user's mode returns to demo only when

@@ -241,8 +241,7 @@ func (o *Orchestrator) cite(ctx context.Context, state *runState, draft string) 
 // applyCitations validates and renumbers a model-produced citation draft.
 //
 // It is a pure function over the model's output — no database, no clock — which
-// is what makes the hallucinated-citation guard testable in isolation
-// (TEST-4.2).
+// is what makes the hallucinated-citation guard testable in isolation.
 //
 // Three things happen, in this order:
 //
@@ -357,10 +356,10 @@ func tidyAfterRemoval(answer string) string {
 // generateCitations makes the structured provider call.
 //
 // The injected turns are appended to state.messages here, exactly as generate
-// does, and recorded on the llm_call event. Both halves matter: Day 6 rebuilds
-// the transcript from these events to resume a run, so a turn that entered the
-// conversation without being recorded makes the replay diverge from what the
-// model actually saw.
+// does, and recorded on the llm_call event. Both halves matter: pause/resume
+// rebuilds the transcript from these events to continue a run, so a turn that
+// entered the conversation without being recorded makes the replay diverge
+// from what the model actually saw.
 func (o *Orchestrator) generateCitations(
 	ctx context.Context,
 	state *runState,

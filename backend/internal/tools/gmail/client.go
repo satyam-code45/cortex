@@ -44,16 +44,21 @@ type Config struct {
 
 	// QueryScope is ANDed into every search (required unless AllowUnscoped).
 	//
-	// Cortex reads a real mailbox, and since sign-in opened (Day 7) any Google
+	// Cortex reads a real mailbox, and since sign-in opened any Google
 	// account can drive the agent — so the pin to a label (e.g.
 	// `label:vantage-labs`) is a structural property of the client, not a
 	// configuration suggestion: NewClient refuses to construct without it.
 	QueryScope string
 
-	// AllowUnscoped permits an empty QueryScope: the mailbox is the connected
-	// user's own (Day 8), so there is nothing to confine the search to. The
-	// demo-workspace client must never set this — the scope pin is what keeps
-	// the shared demo mailbox from being read wholesale.
+	// AllowUnscoped permits an empty QueryScope. Two callers legitimately set
+	// it: a per-user connected mailbox (it is the user's own, so there is
+	// nothing to confine the search to), and the operator-run fixture seeder
+	// (its duplicate check must see the whole mailbox, or a fixture seeded
+	// before the label existed would be inserted twice).
+	//
+	// The AGENT's demo-workspace client must never set it — the scope pin is
+	// what keeps the shared demo mailbox from being read wholesale, and an
+	// agent search is the one path a stranger's question can reach.
 	AllowUnscoped bool
 
 	// HTTPClient is optional; a timeout-bearing client is built when nil.
@@ -130,6 +135,14 @@ func NewClient(cfg Config) (*Client, error) {
 		http:       transport,
 		queryScope: strings.TrimSpace(cfg.QueryScope),
 	}, nil
+}
+
+// QueryScope reports the scope ANDed into every search, empty for an unscoped
+// client. It exists so a caller that must be unscoped — or must not be — can
+// assert which one it built, rather than trusting that it passed the right
+// config.
+func (c *Client) QueryScope() string {
+	return c.queryScope
 }
 
 // APIError is a non-2xx response from Gmail.

@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// TEST-3.3 — Gmail multipart body extraction.
+// Gmail multipart body extraction.
 //
-// REQ-3.2 says gmail_get_message returns "headers + plain-text body
+// The contract: gmail_get_message returns "headers + plain-text body
 // (multipart: prefer text/plain, strip HTML fallback)". Three rules follow, and
 // each is a way a real message breaks a naive reader:
 //

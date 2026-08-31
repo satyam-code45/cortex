@@ -1,7 +1,7 @@
 {
   "company": "Vantage Labs",
   "as_of": "2026-08-21",
-  "note": "Derived from seeder/fixtures/. Issues are identified by summary because Jira assigns keys at seed time. From Day 3 the corpus spans three sources: Jira (issues.json), Notion (notion.json) and Gmail (gmail.json).",
+  "note": "Derived from seeder/fixtures/. Issues are identified by summary because Jira assigns keys at seed time. The corpus spans three sources: Jira (issues.json), Notion (notion.json) and Gmail (gmail.json).",
   "projects": {
     "ATLAS": {
       "name": "Atlas",
@@ -298,7 +298,7 @@
         "gmail_get_message"
       ],
       "unanswerable_from_single_source": true,
-      "note": "The Day 3 acceptance question. Jira alone yields 'blocked on the provider' with no cause; Notion alone names a vendor but not what they said; Gmail alone has the notice but not which issues it blocked."
+      "note": "The cross-source acceptance question. Jira alone yields 'blocked on the provider' with no cause; Notion alone names a vendor but not what they said; Gmail alone has the notice but not which issues it blocked."
     },
     {
       "question": "Who at the payment vendor told us about the delay, and when?",

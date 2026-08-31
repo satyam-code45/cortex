@@ -4,7 +4,7 @@ import "time"
 
 // SetSSETimingsForTest overrides the SSE loop timings and returns a restore
 // func for t.Cleanup. The timings are package-level vars precisely so tests
-// can shorten them (spec day-5, REQ-5.1 / TEST-5.1); this file is the only
+// can shorten them for the SSE endpoint tests; this file is the only
 // door into them from the external api_test package, and it compiles only
 // under `go test`.
 //

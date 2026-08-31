@@ -12,7 +12,7 @@ import (
 
 // The trace: everything a run did, in one JSON document.
 //
-// This is the observability feature (idea.md §15) and it is assembled here
+// This is the observability feature, and it is assembled here
 // rather than in the HTTP handler for one reason: the event payload types are
 // unexported types in this package, and decoding them a second time in
 // internal/api would create a parallel definition of the transcript format that
@@ -20,7 +20,7 @@ import (
 // rows and marshal what this returns.
 //
 // The timeline carries each event's stored payload verbatim. That is deliberate:
-// REQ-4.4 asks for arguments, latency and status per tool call, and those are
+// the trace must carry arguments, latency and status per tool call, and those are
 // already exactly what the transcript records — re-projecting them into a second
 // shape would mean the trace and the replay could disagree about what happened,
 // which defeats the point of having a transcript at all.
@@ -199,8 +199,8 @@ func AssembleTrace(
 // from the state it actually accumulated. The agent_runs row is the fallback,
 // and it is a real fallback rather than a defensive one — a failed run has no
 // run_finished event at all, and a run still in flight has neither. Counting the
-// events themselves is what makes a live trace (Day 5 streams this while the run
-// is working) report sensible numbers instead of zeros.
+// events themselves is what makes a live trace (streamed to the trace panel
+// while the run is working) report sensible numbers instead of zeros.
 func traceTotals(run store.AgentRun, events []store.RunEvent) TraceTotals {
 	totals := TraceTotals{}
 

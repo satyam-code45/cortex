@@ -232,7 +232,7 @@ export interface RunStartedPayload {
   max_iterations: number;
   system_prompt: string;
   tools: string[];
-  // Absent on runs recorded before Day 8.
+  // Absent on runs recorded before per-user source connections existed.
   sources?: RunSources;
   history: EventMessage[];
 }

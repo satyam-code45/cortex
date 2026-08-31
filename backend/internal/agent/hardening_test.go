@@ -13,11 +13,11 @@ import (
 	"cortex/internal/tools"
 )
 
-// TEST-6.2 (orchestrator level, spec A4) and TEST-6.3 (spec A5).
+// Retry hardening at the orchestrator level.
 //
 // The one-retry-for-transient / no-retry-for-permanent policy is pinned by
 // TestRunToolExecutionErrorBecomesObservation in orchestrator_test.go; this
-// file adds A4's named opt-out — an error advertising Permanent() — and A5's
+// file adds the named opt-out — an error advertising Permanent() — and the
 // total-outage guard.
 
 // permanentAwareError mimics the integrations' API error types: Permanent()
@@ -32,7 +32,7 @@ func (e *permanentAwareError) Error() string   { return e.msg }
 func (e *permanentAwareError) Permanent() bool { return e.permanent }
 
 // A tool error that reports Permanent() true gets no second attempt; one that
-// reports false gets exactly one (TEST-6.2, A4).
+// reports false gets exactly one.
 func TestRunRetryPolicyHonorsPermanentOptOut(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -85,7 +85,7 @@ func TestRunRetryPolicyHonorsPermanentOptOut(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// TEST-6.3 — total-outage guard (spec A5b)
+// total-outage guard
 // ---------------------------------------------------------------------------
 
 // When every tool call in the run has failed and the streak reaches the

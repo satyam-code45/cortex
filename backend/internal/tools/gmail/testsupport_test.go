@@ -16,12 +16,11 @@ import (
 	"cortex/internal/tools/gmail"
 )
 
-// TEST-3.2 / TEST-3.5 support: a fake Gmail API and a fake Google token
-// endpoint.
+// Test support: a fake Gmail API and a fake Google token endpoint.
 //
 // No test in this package may touch the network — the fixtures under testdata/
 // are recorded response shapes, and every request is served by httptest. The
-// requests are recorded too, because REQ-3.2 constrains them: the bearer token,
+// requests are recorded too — the contract constrains them: the bearer token,
 // the search query (including the optional GMAIL_QUERY_SCOPE narrowing) and the
 // message format are properties of what we send, not of what we parse.
 
@@ -216,9 +215,9 @@ func (f *fakeGmail) client(queryScope string) *gmail.Client {
 	return c
 }
 
-// testQueryScope is the scope tests build clients with: since Day 7 an
-// unscoped client refuses to construct, so there is no "whole mailbox" client
-// to test against.
+// testQueryScope is the scope tests build clients with: a client refuses to
+// construct without a scope unless the caller opts in with AllowUnscoped, so
+// the scoped client is the default subject here.
 const testQueryScope = "label:vantage-labs"
 
 // tool returns one tool by name, failing when it is not registered.

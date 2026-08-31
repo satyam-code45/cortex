@@ -12,16 +12,16 @@ import (
 	"cortex/internal/jobs"
 )
 
-// TEST-2.4 — enqueue transactionality, end to end through the handler.
+// Enqueue transactionality, end to end through the handler.
 //
 // The chat_test cases drive the handler with a stub enqueuer, which proves the
 // handler's own rollback behaviour but not that a *real* River insert joins the
 // same transaction. This file closes that gap: the handler is wired to the
 // actual jobs.Queue, so a 202 must leave exactly one river_job row naming the
-// run in the response body — the property REQ-2.4 is really asking for.
+// run in the response body — the property that actually matters here.
 
 // truncateRiverJobs clears the queue table. testPool only truncates the
-// application tables, and River owns its own schema (REQ-2.4 amendment).
+// application tables, and River owns its own schema.
 func truncateRiverJobs(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	if _, err := pool.Exec(context.Background(), "TRUNCATE river_job"); err != nil {

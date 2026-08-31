@@ -2,7 +2,7 @@
 // answer by investigating with tools.
 //
 // The loop is the heart of Cortex, and it is deliberately ours rather than a
-// framework's (idea.md §1.1: "one binary, one database, zero frameworks"). What
+// framework's ("one binary, one database, zero frameworks"). What
 // it does is simple to state — ask the model, run the tools it asks for, hand
 // back the results, repeat until it answers — and everything interesting is in
 // the failure handling around that: a model that asks for a tool that does not
@@ -131,7 +131,7 @@ type Config struct {
 	Registry *tools.Registry
 
 	// ProviderForUser, when set, supplies each run's completion provider from
-	// its owner's stored key (BYOK, REQ-7.2) — decrypt, construct, discard.
+	// its owner's stored key (BYOK) — decrypt, construct, discard.
 	// An error wrapping ErrLLMKeyUnavailable fails the run through the normal
 	// fail path (it will not heal on retry); any other error is treated as
 	// transient and returned to River for a retry. There is deliberately no
@@ -141,7 +141,7 @@ type Config struct {
 	ProviderForUser func(ctx context.Context, userID uuid.UUID) (llm.Provider, error)
 
 	// RegistryForUser, when set, supplies each run's tool registry from its
-	// owner's source connections (REQ-8.4) — decrypt, construct clients,
+	// owner's source connections — decrypt, construct clients,
 	// discard. Demo mode is all-or-nothing: the factory returns either the
 	// full demo registry or ONLY the owner's connected sources, never a mix.
 	// An error wrapping ErrNoUsableSources fails the run through the normal
@@ -268,7 +268,7 @@ type runState struct {
 	// the orchestrator-wide one (eval, tests).
 	provider llm.Provider
 	// registry is this run's tool set: the full demo registry, or clients
-	// built from the owner's connected sources (REQ-8.4) — never a mix.
+	// built from the owner's connected sources — never a mix.
 	registry *tools.Registry
 	// sources records which workspace registry reaches, for run_started.
 	sources Sources
@@ -600,8 +600,8 @@ func (o *Orchestrator) investigate(ctx context.Context, state *runState) (answer
 					// would put it in the transcript the model sees but in no
 					// event payload, and a run replayed from run_events would
 					// then be missing the very answer the check was reviewing.
-					// That is the invariant TEST-2.5 exists to protect, and it
-					// caught this.
+					// That is the invariant the run_events reconstruction
+					// tests exist to protect, and it caught this.
 					state.checked = true
 					pending = []llm.Message{
 						{Role: llm.RoleAssistant, Content: resp.Text},
@@ -697,9 +697,9 @@ func (o *Orchestrator) generate(
 	// keeps the transcript and the event log in step. Doing it in two places let a
 	// caller append without recording (the log then omits the very instruction
 	// that produced the answer, and a replay diverges) or record without
-	// appending (the log claims a turn the model never saw). Day 6 adds a second
-	// kind of injected turn for approval resumption, so this has to be impossible
-	// to half-do.
+	// appending (the log claims a turn the model never saw). Approval resumption
+	// adds a second kind of injected turn, so this has to be impossible to
+	// half-do.
 	state.messages = append(state.messages, injected...)
 
 	callCtx, cancel := context.WithTimeout(ctx, llmTimeout)

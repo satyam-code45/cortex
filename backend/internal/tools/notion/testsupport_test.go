@@ -15,11 +15,11 @@ import (
 	"cortex/internal/tools/notion"
 )
 
-// TEST-3.2 support: a fake Notion workspace.
+// Test support: a fake Notion workspace.
 //
 // No test in this package may touch the network — the fixtures under testdata/
 // are recorded response shapes, and every request is served by httptest. The
-// requests are recorded too, because REQ-3.1 constrains them: the pinned
+// requests are recorded too, because the contract constrains them: the pinned
 // Notion-Version header, the bearer token, and the `object=page` search filter
 // are all properties of what we send, not of what we parse.
 

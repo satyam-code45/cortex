@@ -30,7 +30,7 @@ const (
 	// "Nordwind" finds nothing while `in:anywhere Nordwind` finds everything.
 	// The agent has no way to phrase its way out of that, so a fixture without
 	// INBOX is a fixture the agent cannot investigate — which is exactly how
-	// BUG-3.A blocked the Day 3 acceptance test.
+	// the cross-source acceptance test was once blocked.
 	LabelInbox = "INBOX"
 	// LabelUnread makes a seeded fixture read like mail that actually arrived.
 	LabelUnread = "UNREAD"

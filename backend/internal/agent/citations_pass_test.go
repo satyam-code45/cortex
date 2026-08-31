@@ -14,10 +14,10 @@ import (
 	"cortex/internal/tools"
 )
 
-// TEST-4.2, at the level the run sees it.
+// The citation pass, at the level the run sees it.
 //
 // The pure validator is covered in citations_internal_test.go. This file covers
-// the rest of REQ-4.3: the pass runs after the loop, its output is what lands on
+// the rest of the contract: the pass runs after the loop, its output lands on
 // agent_runs.answer and in the conversation, and — the part that matters most in
 // production — it cannot fail the run. By the time it runs, the investigation
 // has already made a dozen paid calls; losing that because a citation call
@@ -162,7 +162,7 @@ func TestCitationPassDropsHallucinatedEvidenceEndToEnd(t *testing.T) {
 	}
 }
 
-// REQ-4.3: a failed or unparseable citation pass must not fail the run. The
+// A failed or unparseable citation pass must not fail the run. The
 // draft is stored uncited and the event says why.
 func TestCitationPassFailureStoresTheUncitedDraft(t *testing.T) {
 	tests := []struct {

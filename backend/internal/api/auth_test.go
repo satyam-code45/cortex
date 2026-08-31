@@ -21,11 +21,11 @@ import (
 	"cortex/internal/keys"
 )
 
-// TEST-7.1 — Google OAuth login (REQ-7.1), against an httptest fake Google.
+// Google OAuth login, tested against an httptest fake Google.
 //
 // The fake serves the two endpoints the callback consults: a JWKS set holding
 // the test's own RSA public key, and a token endpoint returning an ID token the
-// test signed itself. Everything the spec names is asserted from the outside:
+// test signed itself. The whole contract is asserted from the outside:
 // state mismatch and bad tokens rejected, the user upserted, the session cookie
 // HttpOnly with only its SHA-256 in the database, the allowlist enforced,
 // logout revoking, /healthz open, and the bearer token accepted.
@@ -257,7 +257,7 @@ func sessionCookieFrom(rec *httptest.ResponseRecorder) *http.Cookie {
 }
 
 // ---------------------------------------------------------------------------
-// TEST-7.1
+// The OAuth callback flow
 // ---------------------------------------------------------------------------
 
 func TestGoogleCallbackSignsInAndStoresOnlyTheSessionHash(t *testing.T) {

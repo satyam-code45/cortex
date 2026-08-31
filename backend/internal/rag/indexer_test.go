@@ -11,12 +11,12 @@ import (
 	"cortex/internal/tools"
 )
 
-// TEST-4.4 — upsert idempotence.
+// Upsert idempotence.
 //
-// REQ-4.5: the pipeline upserts documents keyed (source, external_id) and
-// "skip[s] embedding entirely when content_hash is unchanged". Embedding is the
+// The pipeline upserts documents keyed (source, external_id) and
+// skips embedding entirely when content_hash is unchanged. Embedding is the
 // only step that costs money and the only one that talks to OpenAI, so the
-// property is stated in the spec's own terms: a reindex over unchanged content
+// property is stated in those terms: a reindex over unchanged content
 // makes zero embedder calls.
 //
 // It needs a real Postgres, because the hash comparison is a query — the test
@@ -91,7 +91,7 @@ func TestReindexingUnchangedContentEmbedsNothing(t *testing.T) {
 		t.Fatalf("second IndexSource: %v", err)
 	}
 
-	// The contract, stated exactly as TEST-4.4 does.
+	// The contract: an unchanged reindex embeds nothing.
 	if embedder.callCount() != 0 {
 		t.Errorf("embedder calls on an unchanged reindex = %d, want 0 (submitted %d texts)",
 			embedder.callCount(), len(embedder.submitted()))
@@ -206,7 +206,7 @@ func TestRenamingADocumentIsAChange(t *testing.T) {
 	}
 }
 
-// REQ-4.5: chunks are embedded in batches of at most 100 per API call.
+// Chunks are embedded in batches of at most 100 per API call.
 func TestEmbeddingIsBatchedAtOneHundred(t *testing.T) {
 	pool := testPool(t)
 

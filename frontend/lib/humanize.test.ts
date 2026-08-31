@@ -1,4 +1,4 @@
-// TEST-7.5 — the countdown formatter behind the refresh button's disabled
+// The countdown formatter behind the refresh button's disabled
 // label. The server sends whole seconds (retry_after_seconds); the UI shows
 // m:ss.
 

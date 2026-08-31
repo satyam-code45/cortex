@@ -8,7 +8,7 @@ import (
 	"cortex/internal/tools/gmail"
 )
 
-// Day 8 (REQ-8.4): a user-connected mailbox is the user's own, so the
+// A user-connected mailbox is the user's own, so the
 // registry builder constructs its client with AllowUnscoped instead of a
 // QueryScope pin. The flag is deliberately narrow: it permits an EMPTY scope
 // and nothing else — combining it with a pin is a contradiction NewClient

@@ -1,6 +1,6 @@
 -- +goose Up
 
--- Per-user source connections (Day 8): each row is one user's credential for
+-- Per-user source connections: each row is one user's credential for
 -- one source, AES-256-GCM ciphertext only — same envelope as user_llm_keys.
 -- identity holds display facts (site URL, account name, mailbox address),
 -- never secrets: it is what the connections page may show back.

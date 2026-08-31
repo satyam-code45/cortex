@@ -13,13 +13,13 @@ import (
 	"cortex/internal/tools/gmail"
 )
 
-// TEST-3.2 — the two Gmail tools against recorded fixtures.
+// The two Gmail tools against recorded fixtures.
 //
-// Field mapping first: REQ-3.2 says gmail_search returns message id, from,
+// Field mapping first: gmail_search returns message id, from,
 // subject, date and snippet, and gmail_get_message returns headers plus the
-// plain-text body — nothing wider. Then Evidence, which CLAUDE.md makes
+// plain-text body — nothing wider. Then Evidence, which the tool contract makes
 // non-negotiable: source "gmail", the message id, the subject, the date, and
-// the web URL `https://mail.google.com/mail/u/0/#all/<id>` that Day 4's
+// the web URL `https://mail.google.com/mail/u/0/#all/<id>` that the answer's
 // citations link to.
 
 // mustExecute runs a tool and fails the test on error.
@@ -42,7 +42,7 @@ func mustTime(t *testing.T, value string) time.Time {
 	return parsed
 }
 
-// assertEvidence checks the invariants REQ-3.2 puts on a Gmail EvidenceItem.
+// assertEvidence checks the invariants required of a Gmail EvidenceItem.
 func assertEvidence(t *testing.T, item tools.EvidenceItem, wantID, wantSubject, wantTimestamp string) {
 	t.Helper()
 	if item.Source != "gmail" {
@@ -97,9 +97,9 @@ func TestSearchMessagesFieldMappingAndEvidence(t *testing.T) {
 	if list[0].method != http.MethodGet {
 		t.Errorf("method = %s, want GET", list[0].method)
 	}
-	// REQ-3.2: Gmail query syntax passthrough — the tool's query survives
-	// verbatim inside the mandatory scope (REQ-7.3 made unscoped clients
-	// unconstructible).
+	// Gmail query syntax passthrough — the tool's query survives
+	// verbatim inside the mandatory scope (a tool client never opts out of
+	// scoping, so it cannot be constructed without one).
 	if got, want := list[0].query.Get("q"), testQueryScope+" (from:nordwind.example refunds)"; got != want {
 		t.Errorf("q = %q, want %q", got, want)
 	}
@@ -145,7 +145,7 @@ func TestSearchMessagesFieldMappingAndEvidence(t *testing.T) {
 		"Re: Nordwind v3 refunds sandbox: revised availability", "2026-06-15T16:40:00Z")
 }
 
-// REQ-3.2 + REQ-7.3: every search is confined to GMAIL_QUERY_SCOPE — and the
+// Every search is confined to GMAIL_QUERY_SCOPE — and the
 // user's own top-level OR must not be able to escape, or a signed-in stranger
 // could reach personal mail.
 func TestSearchMessagesAppliesQueryScope(t *testing.T) {
@@ -388,7 +388,7 @@ func TestGmailServerErrorIsRetryable(t *testing.T) {
 	}
 }
 
-// REQ-7.3: the scope pin is structural. A client that could search the whole
+// The scope pin is structural. A client that could search the whole
 // mailbox must be unconstructible, not merely unconfigured — with sign-in open,
 // configuration is the only thing between a stranger and the operator's mail.
 func TestNewClientRequiresQueryScope(t *testing.T) {
@@ -405,7 +405,7 @@ func TestNewClientRequiresQueryScope(t *testing.T) {
 	}
 }
 
-// The Gmail tool set is exactly the two read-only tools REQ-3.2 names. The
+// The Gmail tool set is exactly the two read-only tools. The
 // agent must not be handed a way to send, label, or delete mail.
 func TestGmailToolSetIsReadOnly(t *testing.T) {
 	fake := newFakeGmail(t, map[string]*route{})
@@ -439,7 +439,7 @@ func TestGmailToolSetIsReadOnly(t *testing.T) {
 	}
 }
 
-// BUG-3.D regression: the guidance that decides whether the third hop lands.
+// Regression: the guidance that decides whether the third hop lands.
 //
 // Across three acceptance runs, only the one that read the Notion page before
 // searching reached the email at all — it had Ines Brandt's real address. The
@@ -471,7 +471,7 @@ func TestSearchEmptyResultDoesNotRecommendGuessingASender(t *testing.T) {
 	}
 }
 
-// The search description is where selection is actually steered (REQ-3.4), so
+// The search description is where tool selection is actually steered, so
 // the query guidance lives there and must stay there.
 func TestSearchDescriptionCarriesQueryGuidance(t *testing.T) {
 	fake := newFakeGmail(t, map[string]*route{})

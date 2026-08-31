@@ -66,7 +66,7 @@ CREATE TABLE citations (
     UNIQUE (agent_run_id, marker)
 );
 
--- The indexed half of retrieval (idea.md §11): live tools answer "what is the
+-- The indexed half of retrieval: live tools answer "what is the
 -- status now", this answers "what was written about it".
 --
 -- content_hash is the whole idempotence story. Re-indexing is meant to be run

@@ -8,7 +8,7 @@ import (
 )
 
 // Metric keys, as reported in the per-case JSONL and the summary table.
-// Citation accuracy (REQ-6.2) is deliberately two metrics — the mechanical
+// Citation accuracy is deliberately two metrics — the mechanical
 // source overlap and the judged snippet support — so a regression names its
 // half.
 const (

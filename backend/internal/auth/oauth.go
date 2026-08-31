@@ -1,10 +1,10 @@
 // Package auth holds the OAuth 2.0 / OIDC primitives Cortex hand-rolls:
 // the authorization-code flow shared by Gmail authorization (cmd/gmail-auth)
-// and Google sign-in (REQ-7.1), ID-token verification against Google's JWKS,
+// and Google sign-in, ID-token verification against Google's JWKS,
 // and the session-token helpers behind the API's cookie auth.
 //
 // Hand-rolled for the same reasons the Gmail flow was (it started there and
-// was extracted on Day 7): the flow is small enough to own outright, owning it
+// was extracted for sign-in): the flow is small enough to own outright, owning it
 // keeps the locked stack intact, and every path stays testable against
 // httptest — which a vendored SDK's internal transport is not.
 package auth

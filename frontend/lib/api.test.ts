@@ -1,4 +1,4 @@
-// TEST-7.5 — the API client's cross-cutting auth routing (REQ-7.5).
+// The API client's cross-cutting auth routing.
 //
 // A 401 anywhere routes to /login (except the signed-out probe the login page
 // itself makes), a 409 llm_key_required anywhere routes to settings, and a

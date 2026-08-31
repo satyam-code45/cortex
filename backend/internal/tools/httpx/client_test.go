@@ -15,7 +15,7 @@ import (
 	"cortex/internal/tools/httpx"
 )
 
-// TEST-6.2 (transport level, spec A4) — the shared HTTP core retries throttled
+// Transport-level hardening — the shared HTTP core retries throttled
 // and server-side failures with backoff, honours Retry-After, and treats
 // ordinary 4xx as permanent: a 429 is retried, a 400 is not.
 

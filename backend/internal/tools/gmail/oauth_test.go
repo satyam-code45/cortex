@@ -18,7 +18,7 @@ import (
 	"cortex/internal/tools/gmail"
 )
 
-// TEST-3.5 — the Gmail token store.
+// The Gmail token store.
 //
 // The cached file holds a *refresh* token, which does not expire: it is a
 // long-lived credential to a real mailbox. Three things therefore have to hold,
@@ -411,7 +411,7 @@ func TestNewTokenSourceRequiresRefreshToken(t *testing.T) {
 // the cached token file
 // ---------------------------------------------------------------------------
 
-// REQ-3.2: the cached token is mode 0600.
+// The cached token file must be mode 0600.
 func TestSaveTokenIsOwnerOnly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", ".gmail-token.json")
 
@@ -500,7 +500,7 @@ func TestLoadTokenRejectsFileWithoutRefreshToken(t *testing.T) {
 // the one-time authorization flow
 // ---------------------------------------------------------------------------
 
-// REQ-3.2: the consent URL carries PKCE (S256), a state value, and
+// The consent URL carries PKCE (S256), a state value, and
 // access_type=offline — the last is what makes Google issue a refresh token at
 // all.
 func TestAuthCodeURLCarriesPKCEAndOfflineAccess(t *testing.T) {
@@ -664,10 +664,10 @@ func TestLoadCredentials(t *testing.T) {
 	}
 }
 
-// The default cached-token path is the gitignored one the spec names.
+// The default cached-token path is the gitignored one .env.example documents.
 func TestDefaultTokenPath(t *testing.T) {
 	if gmail.DefaultTokenPath != ".gmail-token.json" {
-		t.Errorf("DefaultTokenPath = %q, want .gmail-token.json (REQ-3.2)", gmail.DefaultTokenPath)
+		t.Errorf("DefaultTokenPath = %q, want the gitignored .gmail-token.json", gmail.DefaultTokenPath)
 	}
 }
 

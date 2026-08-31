@@ -14,7 +14,7 @@ export default defineConfig({
     passWithNoTests: true,
     // Two projects, two environments: pure functions (lib/) stay on node —
     // fast, no DOM globals leaking into parser tests — while component tests
-    // (components/, app/) get jsdom (TEST-7.5).
+    // (components/, app/) get jsdom.
     projects: [
       {
         extends: true,

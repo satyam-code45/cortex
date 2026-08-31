@@ -87,8 +87,8 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	// One process runs both the API and the workers (idea.md §1.1: one binary,
-	// one database). River polls Postgres for jobs, so there is nothing to
+	// One process runs both the API and the workers (one binary, one
+	// database). River polls Postgres for jobs, so there is nothing to
 	// coordinate between them beyond sharing the pool.
 	queue, err := jobs.New(jobs.Config{
 		Pool:         deps.Pool,
@@ -115,7 +115,7 @@ func run(logger *slog.Logger) error {
 		"index_queue", jobs.IndexSourceQueue, "index_workers", cfg.IndexWorkers,
 		"tools", deps.Registry.Len())
 
-	// Auth exists since Day 7, but hostCheck still only admits localhost names —
+	// Auth exists (Google sign-in), but hostCheck still only admits localhost names —
 	// exposing beyond loopback needs that list widened too, so say so.
 	if !isLoopback(cfg.Host) {
 		logger.Warn("server is bound beyond loopback; hostCheck only admits localhost Host headers",

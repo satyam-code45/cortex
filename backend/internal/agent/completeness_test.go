@@ -125,7 +125,7 @@ func TestCompletenessCheckRunsOnlyOnce(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Three loop calls plus the Day 4 citation pass. A fifth would mean a second
+	// Three loop calls plus the citation pass. A fifth would mean a second
 	// completeness check, i.e. an unbounded guard.
 	if got := provider.callCount(); got != 4 {
 		t.Errorf("provider calls = %d, want 4 (two drafts, one check, one citation pass)", got)
@@ -148,7 +148,7 @@ func TestCompletenessCheckRunsOnlyOnce(t *testing.T) {
 
 // Both injected turns have to reach run_events. The draft is what the check is
 // reviewing, so a replay missing it resumes from a conversation that never
-// happened — the invariant TEST-2.5 protects.
+// happened — the run_events reconstruction invariant.
 func TestCompletenessCheckTurnsAreReconstructable(t *testing.T) {
 	pool := testPool(t)
 	seeded := seedRun(t, pool, "why did it slip?")

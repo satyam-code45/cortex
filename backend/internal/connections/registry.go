@@ -25,7 +25,7 @@ type RegistryBuilderConfig struct {
 	// demo mode.
 	Demo *tools.Registry
 
-	// GoogleClientID and GoogleClientSecret are the Day 7 Web OAuth client;
+	// GoogleClientID and GoogleClientSecret are the sign-in Web OAuth client;
 	// per-user Gmail refresh tokens were minted against it and refresh
 	// through it.
 	GoogleClientID     string
@@ -42,7 +42,7 @@ type RegistryBuilderConfig struct {
 }
 
 // RegistryBuilder builds each run's tool registry from the run owner's source
-// connections (REQ-8.4): decrypt → construct clients → discard. It is the
+// connections: decrypt → construct clients → discard. It is the
 // RegistryForUser factory app.Build hands the orchestrator.
 type RegistryBuilder struct {
 	cfg RegistryBuilderConfig
@@ -201,7 +201,7 @@ func (b *RegistryBuilder) buildSource(ctx context.Context, userID uuid.UUID, sou
 		client, err := gmail.NewClient(gmail.Config{
 			TokenSource: tokenSource,
 			// The mailbox is the user's own; there is nothing to confine the
-			// search to (REQ-8.4).
+			// search to.
 			AllowUnscoped: true,
 			BaseURL:       b.cfg.GmailBaseURL,
 			Logger:        b.cfg.Logger,

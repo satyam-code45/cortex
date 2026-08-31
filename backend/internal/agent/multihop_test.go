@@ -13,10 +13,10 @@ import (
 	"cortex/internal/tools"
 )
 
-// TEST-3.4 — a three-hop investigation across Jira, Notion and Gmail.
+// A three-hop investigation across Jira, Notion and Gmail.
 //
-// This is the Day 3 acceptance test in miniature, with the model replaced by a
-// script. The chain REQ-3.3 designs is the point: Jira records that the refunds
+// This is the cross-source acceptance test in miniature, with the model replaced
+// by a script. The designed chain is the point: Jira records that the refunds
 // integration is "blocked on the provider" and never names it; the Notion plan
 // names Nordwind Payments; and only the Gmail thread carries Nordwind's own
 // delay announcement, its reason, and the date the launch moved to. No single
@@ -25,8 +25,8 @@ import (
 // is built out of all three.
 
 // hopTool builds a scripted tool that returns one source's fact plus its
-// evidence. Evidence is mandatory on every result (CLAUDE.md) because Day 4's
-// citations are a join back onto these rows.
+// evidence. Evidence is mandatory on every result because citations
+// are a join back onto these rows.
 func hopTool(name, argument, content string, evidence tools.EvidenceItem) *fakeTool {
 	return &fakeTool{
 		name: name,
@@ -83,7 +83,7 @@ func TestRunMultiHopAcrossThreeSources(t *testing.T) {
 	})
 
 	// assertToolsOffered checks that every iteration is handed the whole
-	// inventory: REQ-3.4 registers all three sources, and a loop that narrows
+	// inventory: all three sources are registered, and a loop that narrows
 	// the tool list after the first hop can never make the second one.
 	assertToolsOffered := func(t *testing.T, call recordedCall) {
 		t.Helper()
@@ -180,7 +180,7 @@ func TestRunMultiHopAcrossThreeSources(t *testing.T) {
 		}
 	}
 	// Three hops, the synthesis, the completeness check that re-reads the
-	// synthesis before it is accepted, and the Day 4 citation pass.
+	// synthesis before it is accepted, and the citation pass.
 	if provider.callCount() != 6 {
 		t.Errorf("provider calls = %d, want 6 (three hops, the synthesis, the completeness check, the citation pass)",
 			provider.callCount())
@@ -210,7 +210,8 @@ func TestRunMultiHopAcrossThreeSources(t *testing.T) {
 	}
 
 	// The transcript records three tool calls, in source order, each with its
-	// observation and its evidence — that is what Day 4 cites and Day 6 replays.
+	// observation and its evidence — that is what the citation pass cites and
+	// what a resume replays.
 	events := loadEvents(t, pool, seeded.runID)
 	want := []string{
 		agent.EventRunStarted,
@@ -297,8 +298,8 @@ func TestRunMultiHopAcrossThreeSources(t *testing.T) {
 	}
 }
 
-// A source that answers nothing must not end the investigation: REQ-3.4's
-// prompt rule is "try a second source when the first only partially answers",
+// A source that answers nothing must not end the investigation: the system
+// prompt's rule is "try a second source when the first only partially answers",
 // and the loop has to keep going for that to be possible.
 func TestRunContinuesToASecondSourceAfterAnEmptyFirstOne(t *testing.T) {
 	pool := testPool(t)

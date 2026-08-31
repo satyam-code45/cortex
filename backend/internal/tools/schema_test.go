@@ -9,8 +9,8 @@ import (
 	"cortex/internal/tools"
 )
 
-// Argument validation and canonicalization are the two pieces of REQ-2.1/REQ-2.2
-// the agent loop leans on hardest:
+// Argument validation and canonicalization are the two pieces of the tool
+// contract the agent loop leans on hardest:
 //
 //   - Validate's message is not a log line, it is an observation the model reads
 //     and acts on, so it has to name the offending argument.

@@ -69,7 +69,7 @@ type CountUserRunsSinceParams struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
-// Per-user rate limit (REQ-7.3): the shared cost of a run is Satyam's upstream
+// Per-user rate limit: the shared cost of a run is Satyam's upstream
 // API quotas even when the LLM spend is the user's. $2 is a timestamp rather
 // than a hardcoded interval so tests can pin the window.
 func (q *Queries) CountUserRunsSince(ctx context.Context, arg CountUserRunsSinceParams) (int64, error) {

@@ -2,7 +2,7 @@
 
 // The message thread: stored history plus the in-flight run's states.
 //
-// Assistant messages carry agent_run_id (Day 5 migration 004); the thread
+// Assistant messages carry agent_run_id (added by migration 004); the thread
 // fetches that run's trace lazily so citation markers resolve to chips even in
 // a re-opened conversation. Messages without a run link — user messages, rows
 // from before the migration — render their markers as plain text.

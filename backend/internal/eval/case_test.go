@@ -9,13 +9,13 @@ import (
 	"cortex/internal/eval"
 )
 
-// TEST-6.1 — case loading and validation (REQ-6.1).
+// Case loading and validation.
 //
 // A case file is the ground-truth contract the whole harness grades against, so
 // a typoed field or a contradictory case must fail loading loudly rather than
 // silently grading against a default forever.
 
-// validCaseYAML is the REQ-6.1 example, verbatim in shape.
+// validCaseYAML is the canonical example case, verbatim in shape.
 const validCaseYAML = `id: atlas-original-deadline
 question: "What was the original deadline for the payment integration in Project Atlas?"
 expected_answer: "June 15"
@@ -251,7 +251,7 @@ func TestLoadCasesAcceptsYMLExtension(t *testing.T) {
 }
 
 // The repository's real case set is itself a fixture the acceptance test runs,
-// so it must load, validate, and meet REQ-6.1's size and category mix.
+// so it must load, validate, and meet the required size and category mix.
 func TestRepositoryCasesAreValid(t *testing.T) {
 	dir := filepath.Join("..", "..", "..", "evals", "cases")
 	if _, err := os.Stat(dir); err != nil {
@@ -263,7 +263,7 @@ func TestRepositoryCasesAreValid(t *testing.T) {
 		t.Fatalf("LoadCases(%s): %v", dir, err)
 	}
 	if len(cases) < 20 {
-		t.Errorf("repository has %d cases, REQ-6.1 requires >= 20", len(cases))
+		t.Errorf("repository has %d cases, the eval suite requires >= 20", len(cases))
 	}
 
 	counts := map[string]int{}
@@ -274,10 +274,10 @@ func TestRepositoryCasesAreValid(t *testing.T) {
 		eval.CategorySingleHop, eval.CategoryMultiHop, eval.CategoryCrossSource, eval.CategoryNegative,
 	} {
 		if counts[category] == 0 {
-			t.Errorf("no cases in category %q; REQ-6.1 requires all four", category)
+			t.Errorf("no cases in category %q; all four categories must be covered", category)
 		}
 	}
 	if counts[eval.CategoryNegative] < 3 {
-		t.Errorf("negative cases = %d, REQ-6.1 asks for ~3", counts[eval.CategoryNegative])
+		t.Errorf("negative cases = %d, the suite needs ~3", counts[eval.CategoryNegative])
 	}
 }

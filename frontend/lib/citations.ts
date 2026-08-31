@@ -1,6 +1,6 @@
 // Citation marker parsing: pure functions, no DOM, so vitest needs no jsdom.
 //
-// The backend guarantees (Day 4, amendment A3) that a stored answer's [n]
+// The backend guarantees that a stored answer's [n]
 // markers are renumbered 1..N and every one is backed by a citation row. The
 // parser still refuses to trust that: a marker is only a chip when it resolves
 // against the run's trace, and everything else — [abc], [0], [99] with no

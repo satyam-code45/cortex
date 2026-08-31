@@ -59,7 +59,7 @@ const (
 
 	// DefaultDevUserEmail identifies the operator: it is the user the bearer
 	// token acts as, and the default admin. It stopped being an implicit chat
-	// identity when Google sign-in landed (Day 7).
+	// identity when Google sign-in landed.
 	DefaultDevUserEmail = "dev@cortex.local"
 	// DefaultRunsPerUserPerHour bounds run creation per user. The LLM spend is
 	// the user's own key, but every run also consumes the server's Jira, Notion
@@ -118,7 +118,7 @@ type Config struct {
 	// JiraAPIToken authenticates against the Jira REST API.
 	JiraAPIToken string
 	// JiraProjects restricts the agent and the indexing crawl to these project
-	// keys (required since Day 7).
+	// keys (required since Google sign-in).
 	//
 	// It was optional while the only user was the operator. With Google sign-in
 	// open, the Jira site has real projects and an authenticated stranger must
@@ -138,7 +138,8 @@ type Config struct {
 	GmailCredentialsPath string
 	// GmailTokenPath is where cmd/gmail-auth cached the refresh token.
 	GmailTokenPath string
-	// GmailQueryScope is ANDed into every Gmail search (required since Day 7).
+	// GmailQueryScope is ANDed into every Gmail search (required since Google
+	// sign-in).
 	//
 	// It was optional while the only user was the operator. With Google sign-in
 	// open, the Gmail account is a real mailbox and an authenticated stranger
@@ -301,7 +302,7 @@ func Load() (*Config, error) {
 	if cfg.JiraAPIToken == "" {
 		missing = append(missing, "JIRA_API_TOKEN")
 	}
-	// Notion and Gmail are required for the same reason Jira is: from Day 3 the
+	// Notion and Gmail are required for the same reason Jira is: the
 	// agent investigates across all three, and a server missing one of them
 	// cannot answer a multi-hop question. It would still answer - badly, and
 	// without ever saying which source it could not reach - which is far worse

@@ -13,9 +13,10 @@ import (
 	"cortex/internal/keys"
 )
 
-// TEST-7.2 — bring-your-own-key endpoints (REQ-7.2).
+// The bring-your-own-key endpoints.
 //
-// The invariants under test are the spec's, not the handlers': the key is
+// The invariants under test belong to the HTTP contract rather than to any
+// handler internal, so they are asserted from the outside: the key is
 // validated with one live call before it is stored, the stored bytes are
 // ciphertext (never the key), no endpoint ever returns the key, a bad key is a
 // 422 carrying the provider's reason, and chat without a key is a 409 the

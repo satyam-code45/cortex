@@ -13,7 +13,7 @@ import (
 	"cortex/internal/store"
 )
 
-// TEST-6.1 (judged half) — the judge prompt wrappers, driven by a fake
+// The judged half of grading — the judge prompt wrappers, driven by a fake
 // provider returning canned verdict JSON.
 //
 // The Grader takes llm.Provider precisely so these tests exist: every prompt

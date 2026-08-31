@@ -7,12 +7,12 @@ import (
 	"testing"
 )
 
-// Day 8 locked design decision: splitting the system prompt into fragments
+// A locked design decision: splitting the system prompt into fragments
 // must not change what a demo-mode run sees. The prompt is evidence (run_started
 // stores it verbatim) and the eval baselines were recorded against the
 // pre-split text, so demo mode has to be BYTE-identical to the single constant
 // it replaced. testdata/system_prompt_demo.golden is that constant, extracted
-// from the pre-Day-8 prompt.go on main.
+// from the pre-split prompt.go on main.
 
 func TestDemoSystemPromptIsByteIdenticalToThePreSplitPrompt(t *testing.T) {
 	golden, err := os.ReadFile("testdata/system_prompt_demo.golden")
@@ -50,7 +50,7 @@ func firstDivergence(a, b string) string {
 	return "one is a prefix of the other"
 }
 
-// REQ-8.4: the user-mode source guide is assembled from the run's connected
+// The user-mode source guide is assembled from the run's connected
 // sources — the agent is promised exactly the systems it has, the demo
 // knowledge base does not exist, and the multi-source hop discipline appears
 // only when there is more than one source to hop between.

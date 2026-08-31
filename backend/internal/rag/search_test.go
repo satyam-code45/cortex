@@ -14,11 +14,11 @@ import (
 	"cortex/internal/tools"
 )
 
-// TEST-4.5 — vector search, against a real pgvector index.
+// Vector search, against a real pgvector index.
 //
 // Known chunks are seeded with fixed embeddings so the cosine ordering is
 // arithmetic rather than a guess, and the query embedding is pinned through the
-// fake embedder. What is being asserted is REQ-4.6: top-k by cosine distance
+// fake embedder. What is being asserted: top-k by cosine distance
 // over document_chunks joined with documents, an optional source filter, and
 // evidence built from the joined document rows so an indexed answer cites
 // exactly like a live one.
@@ -138,7 +138,7 @@ func TestKnowledgeBaseSearchRanksAndFilters(t *testing.T) {
 			wantContentOrder: []string{"Atlas Q2 Plan", "Payments sandbox down", "Vendor timeline"},
 		},
 		{
-			// The source filter is REQ-4.6's second half: same query, one
+			// The source filter is the second half of the contract: same query, one
 			// system.
 			name:             "source filter restricts the search to one system",
 			args:             `{"query":"Atlas Q2 goals","source":"jira"}`,
@@ -194,7 +194,7 @@ func TestKnowledgeBaseSearchRanksAndFilters(t *testing.T) {
 	}
 }
 
-// REQ-4.6: evidence is built from the joined document rows, so an indexed
+// Evidence is built from the joined document rows, so an indexed
 // citation carries the same title, URL and timestamp a live one does.
 func TestKnowledgeBaseEvidenceIsCitable(t *testing.T) {
 	pool := testPool(t)

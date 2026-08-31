@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// TEST-5.4 — the conversation endpoints (REQ-5.6, amendments A1 + A2).
+// The conversation endpoints.
 //
 // GET /api/conversations lists the dev user's conversations newest-updated
 // first; GET /api/conversations/{id}/messages returns the thread in order with

@@ -39,7 +39,7 @@ SELECT c.user_id FROM agent_runs r
 WHERE r.id = $1;
 
 -- name: CountUserRunsSince :one
--- Per-user rate limit (REQ-7.3): the shared cost of a run is Satyam's upstream
+-- Per-user rate limit: the shared cost of a run is Satyam's upstream
 -- API quotas even when the LLM spend is the user's. $2 is a timestamp rather
 -- than a hardcoded interval so tests can pin the window.
 SELECT count(*) FROM agent_runs r

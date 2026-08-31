@@ -201,9 +201,9 @@ func TestEncodeAddress(t *testing.T) {
 	}
 }
 
-// BUG-3.A regression: a seeded fixture must be reachable by an ordinary search.
+// Regression: a seeded fixture must be reachable by an ordinary search.
 //
-// The Day 3 acceptance test failed with all sixteen fixtures present, correct,
+// The cross-source acceptance test failed with all sixteen fixtures present, correct,
 // and correctly dated, because they were inserted with only the custom
 // "Vantage Labs" label. Gmail put them in the mailbox but outside the scope a
 // normal query reaches — `Nordwind` returned nothing while `in:anywhere

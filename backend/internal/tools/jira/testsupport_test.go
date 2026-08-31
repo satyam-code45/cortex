@@ -15,12 +15,12 @@ import (
 	"cortex/internal/tools/jira"
 )
 
-// TEST-2.3 support: a fake Jira site.
+// Test support: a fake Jira site.
 //
 // No test in this package may touch the network — the fixtures under testdata/
 // are recorded response shapes, and every request is served by httptest. That
-// also makes the *requests* assertable, which matters for the REQ-2.3
-// amendment: the client must call GET /rest/api/3/search/jql and must never
+// also makes the *requests* assertable, which matters for the endpoint
+// migration: the client must call GET /rest/api/3/search/jql and must never
 // fall back to the removed /rest/api/3/search (410 Gone on a real site).
 
 const (

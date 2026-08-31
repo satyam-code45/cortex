@@ -1,4 +1,4 @@
-// TEST-8.5 — the connections page states (REQ-8.2/8.3): demo mode with
+// The connections page states: demo mode with
 // nothing connected, connected cards showing identity, an errored connection
 // offering reconnect, the demo-workspace toggle, and paste-form validation
 // errors surfacing inline (the 422 carries the provider's own reason).

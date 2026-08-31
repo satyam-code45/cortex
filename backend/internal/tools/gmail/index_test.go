@@ -10,7 +10,7 @@ import (
 
 // The indexing crawl.
 //
-// Written alongside the Jira crawl tests for the same reason: the Day 4 review
+// Written alongside the Jira crawl tests for the same reason: a code review
 // flagged "no tests for the Jira and Gmail crawl pagination loops" and deferred
 // it, and a query the Jira API rejects outright then shipped as green. These are
 // the two hand-rolled cursor loops in the codebase, so they are where an
@@ -43,8 +43,9 @@ func listBody(nextPageToken string, ids ...string) string {
 
 // The crawl must apply GMAIL_QUERY_SCOPE, and must apply it to the empty
 // "everything" query rather than skipping the narrowing when there is no query
-// of its own. (There is no unscoped case: since Day 7 an unscoped client
-// refuses to construct — see TestNewClientRequiresQueryScope.)
+// of its own. (There is no unscoped case: the crawl's client refuses to
+// construct without a scope, since it never opts in with AllowUnscoped —
+// see TestNewClientRequiresQueryScope.)
 func TestIndexCrawlAppliesTheQueryScope(t *testing.T) {
 	t.Parallel()
 

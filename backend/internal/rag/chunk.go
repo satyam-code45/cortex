@@ -2,7 +2,7 @@
 // source documents into embedded chunks in pgvector, and the tool that searches
 // them.
 //
-// The division of labour with the live tools is the point (idea.md §11). A
+// The division of labour with the live tools is the point. A
 // question about current state — who owns this ticket, what is its status — must
 // go to Jira, because an index is stale the moment it is written. A question
 // about what was written, argued or decided is better served by semantic search
@@ -45,7 +45,7 @@ type Chunk struct {
 
 // EstimateTokens approximates the token count of a string.
 //
-// It is an estimate, and deliberately a crude one: the locked stack (CLAUDE.md)
+// It is an estimate, and deliberately a crude one: the locked stack
 // carries no tokenizer, and pulling in tiktoken to size a chunk would be a
 // dependency bought for a heuristic. Four characters per token is the standard
 // rule of thumb for English text and is what the rest of this codebase already

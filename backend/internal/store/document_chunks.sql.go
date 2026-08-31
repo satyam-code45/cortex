@@ -87,7 +87,7 @@ type SearchDocumentChunksRow struct {
 	Similarity      float64            `json:"similarity"`
 }
 
-// The join is the point (idea.md §11): the vector index finds the chunk, and the
+// The join is the point: the vector index finds the chunk, and the
 // relational half supplies the title, URL and metadata that make it citable.
 // Doing both in one query is only possible because the vectors live in the same
 // Postgres as everything else.

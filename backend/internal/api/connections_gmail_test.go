@@ -16,7 +16,7 @@ import (
 	"cortex/internal/tools/gmail"
 )
 
-// TEST-8.3 — Connect Gmail via OAuth (REQ-8.3), against a fake Google.
+// Connect Gmail via OAuth, tested against a fake Google.
 //
 // The connect leg must ask for exactly gmail.readonly with
 // access_type=offline and prompt=consent; the callback must validate state,
@@ -24,7 +24,7 @@ import (
 // refresh token encrypted, and record the mailbox address as identity. A
 // declined consent or a missing refresh token stores nothing. (The
 // refresh-failure → status=error → gmail-drops-out-of-the-registry half of
-// TEST-8.3 lives with the RegistryBuilder tests in internal/connections.)
+// this behaviour lives with the RegistryBuilder tests in internal/connections.)
 
 const (
 	testGmailRefreshToken = "1//fake-refresh-token-from-consent-0042"

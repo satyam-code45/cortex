@@ -1,4 +1,4 @@
-// TEST-7.5 — the key form's states (REQ-7.5): loading, no key on file, key on
+// The key form's states: loading, no key on file, key on
 // file (provider + last4 only), validate-and-save with a 422 surfacing the
 // provider's reason, delete, and the banner shown when the API client routed a
 // 409 llm_key_required here.

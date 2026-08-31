@@ -54,7 +54,7 @@ const (
 	testNotionToken    = "ntn-test-token"
 	testGmailCredsPath = "./testdata/gmail-credentials.json"
 
-	// Day 7 required vars.
+	// Vars required since Google sign-in.
 	testGmailQueryScope  = "label:vantage-labs"
 	testJiraProjectsPin  = "ATLAS"
 	testGoogleClientID   = "test-client.apps.googleusercontent.com"
@@ -72,13 +72,13 @@ func requiredEnv() map[string]string {
 		"JIRA_BASE_URL":  testJiraBaseURL,
 		"JIRA_EMAIL":     testJiraEmail,
 		"JIRA_API_TOKEN": testJiraAPIToken,
-		// Required from Day 3 (REQ-3.4): the agent investigates across three
-		// sources, so a server that cannot reach one of them refuses to start
+		// Required since the agent started investigating across three
+		// sources: a server that cannot reach one of them refuses to start
 		// rather than answering multi-hop questions with a third of the
 		// evidence missing.
 		"NOTION_TOKEN":           testNotionToken,
 		"GMAIL_CREDENTIALS_JSON": testGmailCredsPath,
-		// Required from Day 7 (REQ-7.1/7.3): sign-in credentials, operator
+		// Required since Google sign-in opened: its credentials, operator
 		// bearer token, key-encryption secret, and the source pins that keep an
 		// authenticated stranger inside the demo workspace.
 		"GMAIL_QUERY_SCOPE":          testGmailQueryScope,
@@ -90,10 +90,10 @@ func requiredEnv() map[string]string {
 	}
 }
 
-// withDay7Want fills the Day 7 fields a pre-existing want literal leaves at
-// their zero value: every case built on requiredEnv() gets the same required
+// withSignInWant fills the sign-in-era fields a pre-existing want literal leaves
+// at their zero value: every case built on requiredEnv() gets the same required
 // values and defaults, and only a case that varies one of them states it.
-func withDay7Want(want config.Config) config.Config {
+func withSignInWant(want config.Config) config.Config {
 	if want.GmailQueryScope == "" {
 		want.GmailQueryScope = testGmailQueryScope
 	}
@@ -136,7 +136,7 @@ func withEnv(overrides map[string]string) map[string]string {
 	return env
 }
 
-// TEST-1.1: required variables are enforced, defaults applied (REQ-1.5, REQ-1.8).
+// Required variables are enforced, defaults applied.
 func TestLoad(t *testing.T) {
 	tests := []struct {
 		name string
@@ -161,7 +161,7 @@ func TestLoad(t *testing.T) {
 			},
 		},
 		{
-			// The pins stopped being optional when sign-in opened (REQ-7.3); the
+			// The pins stopped being optional when sign-in opened; the
 			// error must say why, not just name the variable.
 			name:            "missing source pins are reported with their rationale",
 			env:             withEnv(map[string]string{"GMAIL_QUERY_SCOPE": "", "JIRA_PROJECTS": ""}),
@@ -192,8 +192,9 @@ func TestLoad(t *testing.T) {
 			wantErrOmits:    []string{"DATABASE_URL", "JIRA_BASE_URL"},
 		},
 		{
-			// Jira became required on Day 2: every agent tool reaches Jira, so a
-			// server without credentials cannot answer anything.
+			// Jira became required when the first agent tools landed: they all
+			// reached Jira, so a server without credentials could not answer
+			// anything.
 			name:            "missing JIRA_API_TOKEN only",
 			env:             withEnv(map[string]string{"JIRA_API_TOKEN": ""}),
 			wantErr:         true,
@@ -394,7 +395,7 @@ func TestLoad(t *testing.T) {
 			},
 		},
 		{
-			// Was "unrelated later-day vars are ignored" until Day 5 started
+			// Was "unrelated future vars are ignored" until the CORS check started
 			// reading FRONTEND_ORIGIN. A trailing slash is trimmed because the
 			// value is compared byte-for-byte against the browser's Origin
 			// header, which never carries one.
@@ -462,7 +463,7 @@ func TestLoad(t *testing.T) {
 			}
 			// DeepEqual rather than !=: Config gained a slice field
 			// (JiraProjects) and is no longer comparable.
-			tt.want = withDay7Want(tt.want)
+			tt.want = withSignInWant(tt.want)
 			if !reflect.DeepEqual(*cfg, tt.want) {
 				// Config implements Stringer with its secrets redacted, so this
 				// message cannot leak the API key or the Jira token.
@@ -472,7 +473,7 @@ func TestLoad(t *testing.T) {
 	}
 }
 
-// Defaults are exported so callers (and .env.example) stay in sync with REQ-1.5.
+// Defaults are exported so callers (and .env.example) stay in sync.
 func TestDefaultConstants(t *testing.T) {
 	tests := []struct {
 		name string

@@ -8,9 +8,9 @@ import (
 	"cortex/internal/store"
 )
 
-// TEST-6.1 (mechanical half) — the graders that need no judge.
+// The mechanical half of grading — the graders that need no judge.
 //
-// Spec A3 pins the matching rule for expected_sources: an expected source
+// The matching rule for expected_sources is pinned: an expected source
 // matches an evidence row when it is a case-insensitive substring of the row's
 // external_id, title, or URL — because only Jira evidence carries readable
 // external ids, and case authors write Notion page titles and Gmail subjects.

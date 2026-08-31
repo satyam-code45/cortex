@@ -19,15 +19,15 @@ import (
 	"cortex/internal/tools"
 )
 
-// TEST-4.3 — trace assembly, end to end.
+// Trace assembly, end to end.
 //
 // A scripted fake-provider run is driven to completion through the real
-// orchestrator, and then GET /api/runs/{id}/trace (REQ-4.4) is asked for the
+// orchestrator, and then GET /api/runs/{id}/trace is asked for the
 // whole story. What the endpoint returns has to be a complete, interleaved
 // timeline that matches run_events row for row, with the evidence and the
 // citations resolved — a marker in the answer has to lead, through the trace, to
-// a source with a real URL. That is the acceptance criterion for the day, and it
-// is also what the Day 5 trace panel is built on.
+// a source with a real URL. That is the feature's acceptance criterion, and it
+// is also what the trace panel is built on.
 //
 // This lives in the agent test package because the scripted provider does: the
 // run has to be real for the trace to be worth asserting on.
@@ -245,7 +245,7 @@ func TestTraceEndpointReturnsTheWholeRun(t *testing.T) {
 				if call.schema == nil {
 					t.Fatal("the citation pass did not ask for structured output")
 				}
-				// REQ-4.3: the pass sees the numbered evidence list, which is
+				// The pass sees the numbered evidence list, which is
 				// the only handle the model has on a citation.
 				last := call.messages[len(call.messages)-1].Content
 				for _, want := range []string{"[1] jira ATLAS-1", "[3] notion page-atlas-plan"} {
@@ -262,7 +262,7 @@ func TestTraceEndpointReturnsTheWholeRun(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// The answer that was stored is the rewritten one (REQ-4.3): markers
+	// The answer that was stored is the rewritten one: markers
 	// included, renumbered 1..N.
 	run := loadRun(t, pool, seeded.runID)
 	if run.status != "completed" {
@@ -365,7 +365,7 @@ func TestTraceEndpointReturnsTheWholeRun(t *testing.T) {
 		t.Errorf("timeline order = %v, want %v", timelineTypes, wantTypes)
 	}
 
-	// REQ-4.4 asks the timeline to carry arguments, latency and status per tool
+	// The timeline must carry arguments, latency and status per tool
 	// call. They live in the payloads the transcript already records.
 	for i, entry := range got.Timeline {
 		payload := map[string]any{}
@@ -388,7 +388,7 @@ func TestTraceEndpointReturnsTheWholeRun(t *testing.T) {
 	}
 
 	// -----------------------------------------------------------------------
-	// tool calls: the normalized projection (REQ-4.2)
+	// tool calls: the normalized projection
 	// -----------------------------------------------------------------------
 
 	if len(got.ToolCalls) != 2 {
@@ -424,7 +424,7 @@ func TestTraceEndpointReturnsTheWholeRun(t *testing.T) {
 			t.Errorf("tool_calls[%d].error = %q on a successful call, want null", i, *call.Error)
 		}
 		if call.LatencyMS == nil {
-			t.Errorf("tool_calls[%d].latency_ms is null; REQ-4.4 requires the latency", i)
+			t.Errorf("tool_calls[%d].latency_ms is null; the trace must carry the latency", i)
 		}
 		if call.EvidenceCount != want.evidence {
 			t.Errorf("tool_calls[%d].evidence_count = %d, want %d", i, call.EvidenceCount, want.evidence)
@@ -566,7 +566,7 @@ func TestTraceEndpointReturnsTheWholeRun(t *testing.T) {
 	}
 }
 
-// REQ-4.4: ownership is enforced in the query. A trace exposes far more than the
+// Ownership is enforced in the query. A trace exposes far more than the
 // answer does, and the run id comes straight from the caller.
 func TestTraceIsScopedToTheOwner(t *testing.T) {
 	pool := testPool(t)

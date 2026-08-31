@@ -12,8 +12,7 @@ import (
 	"cortex/internal/tools"
 )
 
-// REQ-4.2 — evidence persistence, with A1's per-run numbering and A2's per-run
-// dedupe.
+// Evidence persistence, with per-run numbering and per-run dedupe.
 //
 // The numbers are the citation markers, so they have to be assigned once per
 // document per run. Two tool calls that both surface ATLAS-1 must produce one

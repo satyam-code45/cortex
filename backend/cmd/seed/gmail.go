@@ -117,7 +117,7 @@ func runGmail(logger *slog.Logger, confirm bool, fixturesDir string) error {
 		logger.Info("fixture label ready", "name", file.Label, "id", id)
 	}
 	// INBOX is included unconditionally. Without it a fixture is in the mailbox
-	// but unreachable by any ordinary search, which is what made the Day 3
+	// but unreachable by any ordinary search, which is what made the cross-source
 	// acceptance test fail with all sixteen messages present and correct.
 	labelIDs := gmail.FixtureLabelIDs(fixtureLabelID)
 
@@ -178,11 +178,11 @@ func runGmail(logger *slog.Logger, confirm bool, fixturesDir string) error {
 // verifyReachable checks that a seeded fixture can be found the way the agent
 // will look for it.
 //
-// This is the invariant BUG-3.A was really about, and the one no unit test could
-// have caught: the fixtures were present, correct, and correctly dated, and the
-// agent still could not see them. It is checked with an ordinary query — no
-// in:anywhere, no includeSpamTrash — because an ordinary query is all the agent
-// has.
+// This is the invariant the INBOX-label bug was really about, and the one no
+// unit test could have caught: the fixtures were present, correct, and
+// correctly dated, and the agent still could not see them. It is checked with
+// an ordinary query — no in:anywhere, no includeSpamTrash — because an ordinary
+// query is all the agent has.
 //
 // Gmail does not index an inserted message immediately, so an empty probe
 // moments after a seed may simply be early. The failure says so rather than
@@ -202,7 +202,7 @@ func verifyReachable(ctx context.Context, client *gmail.Client, logger *slog.Log
 			"They may still be indexing — Gmail does not make an inserted message searchable "+
 			"immediately. Wait a minute and re-run `make seed-gmail`; it re-probes without "+
 			"inserting anything.\n"+
-			"If it stays at zero the agent cannot reach the email hop, and the Day 3 acceptance "+
+			"If it stays at zero the agent cannot reach the email hop, and the cross-source acceptance "+
 			"test will fail however it phrases its search.", probe)
 	}
 	logger.Info("fixtures verified searchable by an ordinary query", "probe", probe, "matches", count)
@@ -231,8 +231,12 @@ func buildGmailClient(cfg *config.Config, logger *slog.Logger) (*gmail.Client, e
 		TokenSource: source,
 		// Deliberately unscoped: the duplicate check has to see the whole
 		// mailbox. Scoping it to the fixture label would let a fixture that was
-		// seeded before the label existed be inserted a second time.
-		Logger: logger,
+		// seeded before the label existed be inserted a second time. This is an
+		// operator-run tool over a mailbox the operator owns, and no model
+		// chooses its queries — the searches are committed constants — so the
+		// scope pin that confines the agent buys nothing here.
+		AllowUnscoped: true,
+		Logger:        logger,
 	})
 }
 

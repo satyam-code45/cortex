@@ -20,7 +20,7 @@ import (
 	"cortex/internal/tools"
 )
 
-// Test support for the connections package (Day 8).
+// Test support for the connections package.
 //
 // The Service is the one path to user_connections and everything it stores is
 // ciphertext, so these tests need a real Postgres. They follow the repository
@@ -28,7 +28,7 @@ import (
 // serialize truncation across packages with the shared advisory lock.
 
 // testEncryptionSecret is a valid LLM_KEY_ENCRYPTION_SECRET (64 hex chars) —
-// source credentials share the same envelope (REQ-8.1).
+// source credentials share the same encryption envelope as LLM keys.
 const testEncryptionSecret = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 
 func newTestCipher(t *testing.T) *keys.Cipher {

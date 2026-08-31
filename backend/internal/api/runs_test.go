@@ -13,7 +13,7 @@ import (
 	"cortex/internal/api"
 )
 
-// REQ-2.4's polling endpoint: GET /api/runs/{id} → status, answer, error.
+// The polling endpoint: GET /api/runs/{id} → status, answer, error.
 //
 // This is the other half of the async switch. Answer and Error are pointers in
 // the response so that "still working" is null rather than an empty string: a

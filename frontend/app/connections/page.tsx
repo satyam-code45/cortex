@@ -1,6 +1,6 @@
 "use client";
 
-// Connections: per-user source connections (Day 8). Jira and Notion connect by
+// Connections: per-user source connections. Jira and Notion connect by
 // pasting a key — validated live against the provider before anything is
 // stored — and Gmail connects with one OAuth click. With no connections (or
 // the demo toggle on) every question runs against the demo workspace; with any

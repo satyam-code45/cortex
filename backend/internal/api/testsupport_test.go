@@ -35,7 +35,7 @@ const testAPIToken = "test-api-token"
 // stubEnqueuer is a hand-written api.Enqueuer: no mocking framework, the locked
 // stack has no test dependencies.
 //
-// It replaces Day 1's stubProvider. Since the chat handler became asynchronous
+// It replaces the original stubProvider. Since the chat handler became asynchronous
 // it makes no LLM calls at all, and the thing worth asserting is whether a run
 // was queued — and, when err is set, that a failed enqueue takes the whole
 // transaction down with it.
@@ -252,8 +252,8 @@ func discardLogger() *slog.Logger {
 // tests across packages. Any stable constant works; this one spells "cortex".
 const testDatabaseLockID = int64(0x636F72746578)
 
-// testPool connects to TEST_DATABASE_URL and truncates the Day 1 tables.
-// TEST-1.3: integration tests SKIP (never fail) when the variable is unset.
+// testPool connects to TEST_DATABASE_URL and truncates the core tables.
+// Integration tests SKIP (never fail) when the variable is unset.
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
@@ -311,7 +311,7 @@ func queryInt(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) int {
 
 // assertNotDevDatabase refuses to run against the development database.
 //
-// testPool truncates users, which cascades to every table Day 1 writes. The
+// testPool truncates users, which cascades to every table the app writes. The
 // natural way to "fix" a missing test database is to repoint
 // TEST_DATABASE_URL at DATABASE_URL, and that would silently wipe real data on
 // the next test run — so make it a hard failure instead of a comment in

@@ -19,7 +19,7 @@ import (
 	"cortex/internal/connections"
 )
 
-// TEST-8.4 — per-run tool construction (REQ-8.4), plus the TEST-8.3 clause
+// Per-run tool construction, plus the Gmail-OAuth clause
 // about a Gmail refresh failure: status=error and gmail absent from the user's
 // registry, never replaced by demo data. All provider traffic goes to httptest
 // fakes; the fake Jira records the Basic auth it received, which is how the
@@ -250,7 +250,7 @@ func TestForUserDemoToggleRestoresTheFullDemoSet(t *testing.T) {
 	}
 }
 
-// TEST-8.3 (registry half): a permanently failing refresh marks the gmail
+// The registry half of the Gmail flow: a permanently failing refresh marks the gmail
 // connection status=error and drops it from THIS user's registry — the run
 // keeps their other sources and never gets demo data instead.
 func TestGmailRefreshFailureMarksErrorAndDropsGmailNotReplacedByDemo(t *testing.T) {

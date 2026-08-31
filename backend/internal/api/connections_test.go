@@ -14,14 +14,14 @@ import (
 	"cortex/internal/keys"
 )
 
-// TEST-8.2 — Jira + Notion paste flows (REQ-8.2), against httptest fakes.
+// Jira + Notion paste flows, tested against httptest fakes.
 //
-// The invariants are the spec's: a pasted credential is validated with one
+// The invariants: a pasted credential is validated with one
 // live provider call before anything is stored, what lands in the database is
 // ciphertext, the identity captured is the provider's display facts, a bad
 // credential is a 422 carrying the provider's own reason with nothing stored,
 // and credentials appear in no response body, ever. The GET/DELETE/mode
-// endpoints get the REQ-8.2 mode semantics: user the moment anything is
+// endpoints get the mode semantics: user the moment anything is
 // connected (errored included), demo only when nothing remains or the toggle
 // is on.
 
@@ -144,7 +144,7 @@ func getConnections(t *testing.T, h http.Handler) (*httptest.ResponseRecorder, c
 	return rec, overview
 }
 
-// connectionsOverview mirrors the GET /api/connections contract from the spec.
+// connectionsOverview mirrors the GET /api/connections response contract.
 type connectionsOverview struct {
 	Mode             string `json:"mode"`
 	UseDemoWorkspace bool   `json:"use_demo_workspace"`

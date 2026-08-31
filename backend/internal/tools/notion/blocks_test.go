@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-// TEST-3.1 — the Notion blocks → markdown converter.
+// The Notion blocks → markdown converter.
 //
-// REQ-3.1 fixes what the converter owes the model: paragraphs, headings,
+// The contract fixes what the converter owes the model: paragraphs, headings,
 // bulleted and numbered lists, to-dos, quotes and code all render, nested
 // content renders under its parent, and an unknown block type is *marked*
 // rather than dropped. That last rule is the one worth the most: a plan whose

@@ -1,4 +1,4 @@
-// Package connections stores and serves per-user source connections (Day 8):
+// Package connections stores and serves per-user source connections:
 // a user's own Jira, Notion, and Gmail credentials, encrypted with the same
 // AES-256-GCM envelope as LLM keys. It also builds the per-run tool registry
 // from those connections — demo mode is all-or-nothing, so a run sees either

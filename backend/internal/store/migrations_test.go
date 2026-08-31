@@ -18,7 +18,7 @@ import (
 // migrationsDir is db/migrations relative to this package.
 const migrationsDir = "../../db/migrations"
 
-// TEST-1.4: `goose up` is idempotent — running it twice leaves the schema at the
+// `goose up` is idempotent — running it twice leaves the schema at the
 // same version and `goose status` reports nothing pending. The test provisions a
 // throwaway database so the migrations are exercised from scratch.
 func TestMigrationsAreIdempotent(t *testing.T) {
@@ -64,7 +64,7 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 	}
 }
 
-// REQ-1.3: migration 001 creates the core tables, the required extensions, the
+// Migration 001 creates the core tables, the required extensions, the
 // status/role CHECK constraints, and the unique (agent_run_id, seq) on run_events.
 func TestMigrationSchema(t *testing.T) {
 	goosePath, dsn := requireGoose(t)
@@ -209,7 +209,7 @@ func insertUser(t *testing.T, conn *pgx.Conn, email string) string {
 }
 
 // requireGoose skips unless both the goose CLI and TEST_DATABASE_URL are
-// available (TEST-1.3/TEST-1.4: skip, never fail, without a test database).
+// available (skip, never fail, without a test database).
 func requireGoose(t *testing.T) (goosePath, dsn string) {
 	t.Helper()
 	dsn = os.Getenv("TEST_DATABASE_URL")
@@ -219,7 +219,7 @@ func requireGoose(t *testing.T) (goosePath, dsn string) {
 	goosePath, err := exec.LookPath("goose")
 	if err != nil {
 		if os.Getenv("CI") != "" {
-			t.Fatal("goose CLI not on PATH; TEST-1.4 cannot run in CI")
+			t.Fatal("goose CLI not on PATH; the migration tests cannot run in CI")
 		}
 		t.Skip("goose CLI not on PATH; skipping migration test")
 	}

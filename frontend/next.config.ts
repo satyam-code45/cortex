@@ -1,8 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // next dev otherwise writes AGENTS.md/CLAUDE.md into frontend/ on every run;
-  // the repository has its own CLAUDE.md and does not want generated overlays.
+  // next dev otherwise writes agent-docs overlay files (AGENTS.md and friends)
+  // into frontend/ on every run. This repository maintains its own agent
+  // instructions at the root, so a generated per-directory copy would compete
+  // with them and churn in every diff.
   agentRules: false,
 };
 

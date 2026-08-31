@@ -117,7 +117,7 @@ func run(logger *slog.Logger) error {
 	// would sit in that trend indistinguishable from a collapsed full pass.
 	// A run where every case failed without a single tool call measured the
 	// provider's availability, not the agent — the JSONL keeps the evidence,
-	// but the trend table must not carry a 0-score row (EVAL-6.A).
+	// but the trend table must not carry a 0-score row.
 	switch {
 	case *caseID != "":
 		logger.Info("eval: single-case run not persisted to eval_runs", "case", *caseID)

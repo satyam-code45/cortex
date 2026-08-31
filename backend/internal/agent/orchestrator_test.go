@@ -16,12 +16,12 @@ import (
 	"cortex/internal/tools"
 )
 
-// TEST-2.1 — the agent loop, driven by a scripted fake Provider.
+// The agent loop, driven by a scripted fake Provider.
 //
-// The five behaviours the spec names are the five ways a real run goes sideways:
+// Five behaviours cover the five ways a real run goes sideways:
 // the model answers (happy path), it never stops (iteration cap), it repeats
 // itself (dedupe), it calls a tool wrongly (invalid args), and a tool fails
-// (execution error). REQ-2.2's governing rule is that only the first of those
+// (execution error). The loop's governing rule is that only the first of those
 // ends the run normally and none of the others crashes it — each becomes an
 // observation the model can recover from.
 
@@ -77,7 +77,7 @@ func toolCall(id, name, args string) llm.ToolCall {
 
 // The canonical run: the model calls a tool, reads the observation, and answers.
 //
-// The event sequence asserted here is the Day 5 SSE contract (REQ-2.3), so the
+// The event sequence asserted here is the SSE streaming contract, so the
 // names and the order are part of the interface, not an implementation detail.
 func TestRunHappyPath(t *testing.T) {
 	pool := testPool(t)
@@ -105,7 +105,7 @@ func TestRunHappyPath(t *testing.T) {
 			assert: func(t *testing.T, call recordedCall) {
 				t.Helper()
 				// The loop must send the investigator persona and the tool
-				// inventory (REQ-2.2 step 1).
+				// inventory on the first call.
 				if call.system == "" {
 					t.Error("first call had an empty system prompt")
 				}
@@ -160,7 +160,7 @@ func TestRunHappyPath(t *testing.T) {
 	}
 
 	// One reasoning turn, one answer, one completeness check on that answer, and
-	// the Day 4 citation pass over the accepted answer.
+	// the citation pass over the accepted answer.
 	if provider.callCount() != 4 {
 		t.Errorf("provider calls = %d, want 4", provider.callCount())
 	}
@@ -168,7 +168,7 @@ func TestRunHappyPath(t *testing.T) {
 		t.Errorf("tool executions = %d, want 1", tool.executions())
 	}
 
-	// REQ-2.2 step 5: answer, status and token totals persisted.
+	// On completion: answer, status and token totals persisted.
 	run := loadRun(t, pool, seeded.runID)
 	if run.status != "completed" {
 		t.Errorf("status = %q, want completed", run.status)
@@ -201,7 +201,7 @@ func TestRunHappyPath(t *testing.T) {
 		t.Errorf("last message = %+v, want the assistant's answer", msgs[1])
 	}
 
-	// REQ-2.3: the canonical event set, in order, with a gap-free seq.
+	// The canonical event set, in order, with a gap-free seq.
 	events := loadEvents(t, pool, seeded.runID)
 	want := []string{
 		agent.EventRunStarted,
@@ -226,10 +226,12 @@ func TestRunHappyPath(t *testing.T) {
 		}
 	}
 
-	// REQ-2.3 amendment: Day 1's names are superseded and must not survive.
+	// These were the event names the first scaffold emitted, before the trace
+	// panel and transcript replay fixed the vocabulary. They are superseded and
+	// must not survive: a consumer keying on them would silently see no events.
 	for _, e := range events {
 		if e.Type == "llm_call_completed" || e.Type == "run_completed" {
-			t.Errorf("event type %q is a superseded Day 1 name", e.Type)
+			t.Errorf("event type %q is a superseded pre-trace-panel name", e.Type)
 		}
 	}
 
@@ -287,7 +289,7 @@ func TestRunHappyPath(t *testing.T) {
 	}
 }
 
-// Prior conversation turns are replayed to the model (REQ-2.2 step 1).
+// Prior conversation turns are replayed to the model.
 func TestRunLoadsConversationHistory(t *testing.T) {
 	pool := testPool(t)
 	seeded := seedRun(t, pool, "and which of those slipped?",
@@ -329,7 +331,7 @@ func TestRunLoadsConversationHistory(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // A model that never stops calling tools must be cut off at MAX_ITERATIONS and
-// then asked for a best-effort answer with no tools attached (REQ-2.2 step 4).
+// then asked for a best-effort answer with no tools attached.
 func TestRunMaxIterationCap(t *testing.T) {
 	pool := testPool(t)
 	seeded := seedRun(t, pool, "why is everything late?")
@@ -403,7 +405,7 @@ func TestRunMaxIterationCap(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // The same (name, canonicalized args) pair executes once per run, however the
-// model spells it and however many iterations apart it asks (REQ-2.2 step 2).
+// model spells it and however many iterations apart it asks.
 func TestRunDedupesIdenticalToolCalls(t *testing.T) {
 	schema := json.RawMessage(`{
 	  "type": "object",
@@ -541,7 +543,7 @@ func TestRunInvalidArgumentsBecomeObservations(t *testing.T) {
 		},
 		{
 			// Truncated argument JSON is a real provider failure mode (a cut-off
-			// streamed tool call), and REQ-2.2 step 2 puts it in the same
+			// streamed tool call), and the loop puts it in the same
 			// category as any other bad argument: "invalid → error observation
 			// back to the model, no crash".
 			name:     "arguments are not valid JSON",
@@ -643,7 +645,7 @@ func TestRunInvalidArgumentsBecomeObservations(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // A failing tool becomes an observation too, and the retry policy distinguishes
-// a permanent failure from a transient one (REQ-2.2 step 2).
+// a permanent failure from a transient one.
 func TestRunToolExecutionErrorBecomesObservation(t *testing.T) {
 	permanentErr := fmt.Errorf("%q is not a valid Jira issue key: %w", "the payments ticket", tools.ErrInvalidArgument)
 
@@ -790,7 +792,7 @@ func TestRunSkipsTerminalRun(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// TEST-2.2 — truncation and utility-model summarization
+// truncation and utility-model summarization
 // ---------------------------------------------------------------------------
 
 // An oversized tool result keeps its head verbatim and has the overflow
@@ -889,7 +891,7 @@ func TestRunSummarizesOversizedToolResult(t *testing.T) {
 			provider.callCount())
 	}
 
-	// TEST-2.2's purpose assertion, as persisted: llm_calls carries the
+	// The purpose assertion, as persisted: llm_calls carries the
 	// summarization under its own purpose and on the utility model.
 	calls := loadLLMCalls(t, pool, seeded.runID)
 	want := []string{agent.PurposeAgentLoop, agent.PurposeToolOutputSummary,

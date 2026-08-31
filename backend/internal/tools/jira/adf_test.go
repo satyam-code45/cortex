@@ -8,9 +8,9 @@ import (
 	"cortex/internal/tools/jira"
 )
 
-// TEST-2.3 — ADF conversion, both directions.
+// ADF conversion, both directions.
 //
-// REQ-2.3 puts ADF→text and text→ADF in one file so the round trip is tested as
+// ADF→text and text→ADF live in one file so the round trip is tested as
 // a round trip: reads need the first (REST v3 returns descriptions and comment
 // bodies as an ADF node tree) and the seeder's writes need the second (the same
 // v3 endpoints reject a plain string).

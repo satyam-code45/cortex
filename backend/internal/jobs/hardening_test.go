@@ -9,7 +9,7 @@ import (
 	"cortex/internal/jobs"
 )
 
-// TEST-6.3 (spec A5c) — agent-run jobs carry River MaxAttempts 2.
+// Agent-run jobs carry River MaxAttempts 2.
 //
 // River's default is 25 attempts. An agent run is a paid, non-idempotent
 // investigation: every ordinary failure is already recorded as status=failed

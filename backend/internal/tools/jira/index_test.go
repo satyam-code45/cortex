@@ -11,7 +11,7 @@ import (
 
 // The indexing crawl.
 //
-// BUG-4.A is why this file exists. The crawl shipped with
+// An unbounded-JQL bug is why this file exists. The crawl shipped with
 // `indexJQL = "ORDER BY updated DESC"` — a sort with no restriction — which
 // Atlassian rejects outright:
 //
@@ -19,7 +19,7 @@ import (
 //	          Please add a search restriction to your query.
 //
 // Every Jira index job failed all five attempts and nothing was ever indexed.
-// It reached production green because no test ever executed the crawl: the Day 4
+// It reached production green because no test ever executed the crawl: a code
 // review flagged "no tests for the Jira and Gmail crawl pagination loops" and
 // deferred it, and this is precisely the bug that lived in the gap.
 //

@@ -9,7 +9,7 @@ import (
 	"cortex/internal/api"
 )
 
-// TEST-7.3 — multi-user safety rails (REQ-7.3).
+// Multi-user safety rails.
 //
 // The startup fail-fast for the source pins (GMAIL_QUERY_SCOPE, JIRA_PROJECTS)
 // is asserted in internal/config/config_test.go ("missing source pins are

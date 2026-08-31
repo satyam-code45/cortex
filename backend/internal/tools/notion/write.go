@@ -183,7 +183,7 @@ type Bot struct {
 
 // CurrentBot returns the integration the token authenticates as, via
 // GET /v1/users/me. It doubles as the live credential check for the
-// paste-a-key connection flow (Day 8): a bad token surfaces here as an
+// paste-a-key connection flow: a bad token surfaces here as an
 // APIError before anything is stored.
 func (c *Client) CurrentBot(ctx context.Context) (Bot, error) {
 	var me struct {

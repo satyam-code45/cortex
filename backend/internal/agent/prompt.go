@@ -6,7 +6,7 @@ import (
 )
 
 // The system prompt is assembled from named constant fragments so a run in
-// user mode (Day 8: per-user source connections) can carry only the guides for
+// user mode (per-user source connections) can carry only the guides for
 // the sources it actually has. The fragments stay constants — and systemPrompt
 // stays a constant concatenation of them — because the prompt is also
 // *evidence*: the run_started event stores the exact prompt a run used, so a
@@ -187,7 +187,7 @@ var sourceGuides = map[string]string{
 // date and the tool inventory.
 //
 // Demo mode emits the full three-system prompt, byte-identical to what every
-// run before Day 8 used. User mode (per-user source connections) tells the
+// run used before per-user source connections existed. User mode tells the
 // agent exactly which systems exist for this run — an agent promised three
 // systems and given one spends its iterations discovering the lie.
 //

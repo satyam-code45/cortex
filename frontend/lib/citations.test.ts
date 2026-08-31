@@ -1,6 +1,6 @@
-// TEST-5.3 — the citation marker parser (REQ-5.3).
+// The citation marker parser.
 //
-// Spec contract: [1][2]-style markers in the answer markdown are extracted and
+// The contract: [1][2]-style markers in the answer markdown are extracted and
 // mapped to the run trace's evidence — resolution goes through trace.citations
 // (whose marker strings are exactly "[n]") to trace.evidence by evidence_seq.
 // Malformed markers ([abc], [0], [1.5]) and numbers no citation row backs stay

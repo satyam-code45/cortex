@@ -6,7 +6,7 @@
 //
 //   - Result.Content is what the model sees, and it is charged for on every
 //     later iteration of the loop. Tools compact aggressively.
-//   - Result.Evidence is what the *system* sees. Citations (Day 4) are built by
+//   - Result.Evidence is what the *system* sees. Citations are built by
 //     joining the answer back to evidence rows, so a tool that returns content
 //     without evidence produces claims that can never be sourced. Returning
 //     evidence is a hard convention, not a nicety.
@@ -83,7 +83,7 @@ type EvidenceItem struct {
 // Evidence rows are persisted per run and rendered in the trace panel, so a
 // whole 4KB description in every snippet would bloat both. It lives here rather
 // than in each integration because it is a property of the evidence schema that
-// Day 4 citations render, not of any one source.
+// citations render, not of any one source.
 const MaxSnippetRunes = 300
 
 // Snippet shortens text for an EvidenceItem, collapsing whitespace.

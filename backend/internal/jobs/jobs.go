@@ -4,7 +4,7 @@
 // River is a job queue built on Postgres, which is why it is here at all: an
 // agent run takes tens of seconds and a dozen paid LLM calls, so it cannot live
 // inside an HTTP request. The usual answer is Redis plus a separate worker
-// process; River lets the queue be the database we already have (idea.md §16),
+// process; River lets the queue be the database we already have,
 // which keeps the deployment to one binary and one datastore.
 //
 // The property that matters most is transactional enqueue: River's InsertTx

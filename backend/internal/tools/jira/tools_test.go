@@ -13,12 +13,12 @@ import (
 	"cortex/internal/tools/jira"
 )
 
-// TEST-2.3 — the four Jira tools against recorded fixtures.
+// The four Jira tools against recorded fixtures.
 //
 // Two things are being checked at once. The obvious one is field mapping: only
-// the fields REQ-2.3 lists may reach the model, rendered compactly. The less
-// obvious one is Evidence — REQ-2.1 makes populating it non-negotiable, because
-// Day 4's citations are built by joining an answer back to evidence rows, and a
+// the fixed field set may reach the model, rendered compactly. The less
+// obvious one is Evidence — populating it is non-negotiable, because
+// citations are built by joining an answer back to evidence rows, and a
 // tool that returns content without evidence produces claims nothing can source.
 
 // mustExecute runs a tool and fails the test on error.
@@ -78,7 +78,7 @@ func assertEvidence(t *testing.T, item tools.EvidenceItem, wantKey, wantURL, wan
 
 // The search tool must page on the cursor against /rest/api/3/search/jql, and
 // must never rely on a result count: the fixtures carry no `total` field
-// because the replacement endpoint does not send one (REQ-2.3 amendment).
+// because the replacement endpoint does not send one.
 func TestSearchIssuesPagesOnCursor(t *testing.T) {
 	fake := newFakeJira(t, map[string]*route{
 		pathSearchJQL:    fixtureRoute("search_jql_page1.json", "search_jql_page2.json"),
@@ -100,7 +100,7 @@ func TestSearchIssuesPagesOnCursor(t *testing.T) {
 		t.Errorf("jql = %q, want the tool's argument", got)
 	}
 	if got := requests[0].query.Get("fields"); got != "key,summary,status,assignee,duedate,updated" {
-		t.Errorf("fields = %q, want only the fields REQ-2.3 lists", got)
+		t.Errorf("fields = %q, want only the fixed compact field set", got)
 	}
 	if requests[0].query.Has("nextPageToken") {
 		t.Error("first request carried a nextPageToken")
@@ -117,7 +117,7 @@ func TestSearchIssuesPagesOnCursor(t *testing.T) {
 		t.Errorf("client called the removed %s endpoint %d times", pathSearchLegacy, len(legacy))
 	}
 
-	// Every field REQ-2.3 lists appears on the issue's line, and nothing that
+	// Every field in the compact set appears on the issue's line, and nothing that
 	// would only come from a wider field set does.
 	wantLines := []string{
 		"ATLAS-101 [Blocked] Checkout fails on expired payment tokens — assignee: Priya Raman; due: 2026-07-31; updated: 2026-06-12",
@@ -175,8 +175,8 @@ func TestSearchIssuesRespectsMaxResults(t *testing.T) {
 	}
 }
 
-// An empty result must not read as "there are none": REQ-2.2's prompt guidance
-// and the tool's own observation both exist to stop that inference.
+// An empty result must not read as "there are none": the system prompt's
+// guidance and the tool's own observation both exist to stop that inference.
 func TestSearchIssuesEmptyResultIsQualified(t *testing.T) {
 	fake := newFakeJira(t, map[string]*route{
 		pathSearchJQL: fixtureRoute("search_jql_empty.json"),
@@ -334,7 +334,7 @@ func TestGetIssueMapsFieldsAndRendersADF(t *testing.T) {
 // jira_get_issue_history
 // ---------------------------------------------------------------------------
 
-// The changelog is where deadline changes live (REQ-2.3), so each entry must
+// The changelog is where deadline changes live, so each entry must
 // reach the model as field, from, to, author, date.
 func TestGetIssueHistoryMapsChangelog(t *testing.T) {
 	fake := newFakeJira(t, map[string]*route{
@@ -384,7 +384,7 @@ func TestGetIssueHistoryMapsChangelog(t *testing.T) {
 }
 
 // An issue with no recorded changes says so plainly. The seeder's whole
-// "history must be performed, not declared" amendment exists because this is
+// "history must be performed, not declared" rule exists because this is
 // what an un-replayed history looks like.
 func TestGetIssueHistoryEmpty(t *testing.T) {
 	fake := newFakeJira(t, map[string]*route{
@@ -506,8 +506,8 @@ func TestIssueToolsRejectInvalidKeys(t *testing.T) {
 	}
 }
 
-// The tool set is the four tools REQ-2.3 names plus jira_list_projects, added
-// for BUG-3.C: without it a project key guessed from the question wording is
+// The tool set is the four read tools plus jira_list_projects, added
+// because without it a project key guessed from the question wording is
 // unrecoverable, because Jira answers an unknown key with zero results rather
 // than an error. Each has a schema the registry accepts and a description the
 // model can act on.
@@ -581,7 +581,7 @@ func TestNewToolsSurface(t *testing.T) {
 	}
 }
 
-// Every non-empty result carries evidence. REQ-2.1 calls this non-negotiable,
+// Every non-empty result carries evidence. This is non-negotiable,
 // so it is asserted once across the whole tool set rather than trusted per tool.
 func TestEveryToolPopulatesEvidence(t *testing.T) {
 	fake := newFakeJira(t, map[string]*route{
@@ -624,7 +624,7 @@ func TestEveryToolPopulatesEvidence(t *testing.T) {
 	}
 }
 
-// BUG-3.C regression: the agent had no way to discover which projects exist.
+// Regression: the agent had no way to discover which projects exist.
 //
 // Run a3b7a833 opened with `project = PAYMENT`, a key invented from the wording
 // of the question. Jira answers an unknown key with zero results rather than an
@@ -669,7 +669,7 @@ func TestListProjectsNamesTheKeysToSearch(t *testing.T) {
 }
 
 // TestSearchEmptyResultWarnsAboutUnknownProjectKeys checks the other half of the
-// BUG-3.C fix: an empty result must not read as "no such issues" when the cause
+// same fix: an empty result must not read as "no such issues" when the cause
 // may be a key that does not exist.
 func TestSearchEmptyResultWarnsAboutUnknownProjectKeys(t *testing.T) {
 	fake := newFakeJira(t, map[string]*route{

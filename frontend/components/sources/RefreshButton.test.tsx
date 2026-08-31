@@ -1,5 +1,5 @@
-// TEST-7.5 — the refresh countdown renders from the server's
-// retry_after_seconds (REQ-7.5). The server owns the cooldown; the component
+// The refresh countdown renders from the server's
+// retry_after_seconds. The server owns the cooldown; the component
 // only displays and ticks the figure it was handed — it never computes one.
 
 import "@testing-library/jest-dom/vitest";

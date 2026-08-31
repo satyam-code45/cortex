@@ -11,10 +11,10 @@ import (
 	"cortex/internal/llm"
 )
 
-// A4 — llm.Provider gains GenerateStructured, implemented on the OpenAI provider
+// llm.Provider gains GenerateStructured, implemented on the OpenAI provider
 // through response_format: {type: json_schema, strict: true}.
 //
-// The citation pass (REQ-4.3) decodes the result into a fixed shape, so strict
+// The citation pass decodes the result into a fixed shape, so strict
 // mode is the whole point: a model that wraps its JSON in prose or renames a
 // field turns a recoverable step into a parse error. That the request actually
 // carries the schema, and carries strict:true, is a wire contract worth pinning

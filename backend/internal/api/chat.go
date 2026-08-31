@@ -65,8 +65,8 @@ type chatResponse struct {
 //
 // POST /api/chat {"conversation_id"?, "message"} → 202 {"conversation_id","run_id"}
 //
-// Poll GET /api/runs/{id} for the outcome. Day 5 replaces polling with SSE over
-// the same run_events the worker is already writing.
+// Outcome: GET /api/runs/{id} for a one-shot read, or stream it live from
+// GET /api/runs/{id}/events (SSE over the same run_events the worker writes).
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	logger := s.deps.Logger
 	ctx := r.Context()
@@ -191,7 +191,7 @@ func (s *Server) enqueueRun(ctx context.Context, conversationID *uuid.UUID, mess
 		return queuedRun{}, errors.New("no authenticated user in context")
 	}
 
-	// BYOK (REQ-7.2): a run without a stored key would only fail in the worker,
+	// BYOK: a run without a stored key would only fail in the worker,
 	// after a row and a job exist — check at enqueue time so a keyless user
 	// gets a 409 and nothing is created. The worker still decrypts at execution
 	// time; this is the fail-fast, not the source of truth.
@@ -202,7 +202,7 @@ func (s *Server) enqueueRun(ctx context.Context, conversationID *uuid.UUID, mess
 		return queuedRun{}, fmt.Errorf("check llm key: %w", err)
 	}
 
-	// Per-user rate limit (REQ-7.3): the LLM spend is the user's own key, but
+	// Per-user rate limit: the LLM spend is the user's own key, but
 	// every run also consumes the server's Jira/Notion/Gmail quotas. The count
 	// is not serializable with the insert below, so two concurrent requests can
 	// both pass at N-1 — acceptable for a courtesy limit; the hard costs are

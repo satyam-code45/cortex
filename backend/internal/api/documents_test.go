@@ -16,7 +16,7 @@ import (
 	"cortex/internal/api"
 )
 
-// TEST-7.4 — documents API + rate-limited refresh (REQ-7.4, REQ-7.5).
+// The documents API + rate-limited refresh.
 //
 // The listing is read from our documents table (never live APIs): source
 // filter, ILIKE search across title and content, per-source counts, a hard

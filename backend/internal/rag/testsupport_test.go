@@ -21,11 +21,11 @@ import (
 
 // Test support for the RAG layer.
 //
-// Everything here is hand-written: the locked stack (CLAUDE.md) carries no test
+// Everything here is hand-written: the locked stack carries no test
 // dependencies, and the two things worth faking — the embedding provider and a
 // crawlable source — are small enough that a fake is clearer than a framework.
 //
-// The embedder is a *counting* fake on purpose. TEST-4.4 is entirely about how
+// The embedder is a *counting* fake on purpose. What these tests assert is how
 // many times it was called: embedding is the only part of indexing that costs
 // money, so "a reindex over unchanged content embeds nothing" is a property that
 // can only be observed by counting calls.
@@ -44,8 +44,8 @@ type fakeEmbedder struct {
 	mu sync.Mutex
 	// calls is the number of Embed invocations, i.e. API round trips.
 	calls int
-	// batches records the size of each call, so the ≤100 batching rule
-	// (REQ-4.5) can be asserted.
+	// batches records the size of each call, so the ≤100-per-call
+	// batching rule can be asserted.
 	batches []int
 	// texts is everything that was ever submitted for embedding.
 	texts []string
@@ -122,7 +122,7 @@ func hashVector(text string) []float32 {
 }
 
 // sparseVector builds an embedding with the given components set, which is what
-// makes cosine ordering predictable by hand in TEST-4.5.
+// makes cosine ordering predictable by hand in the vector-search tests.
 func sparseVector(components map[int]float32) []float32 {
 	vector := make([]float32, embeddingDimensions)
 	for index, value := range components {
@@ -181,7 +181,7 @@ func discardLogger() *slog.Logger {
 const testDatabaseLockID = int64(0x636F72746578)
 
 // testPool connects to TEST_DATABASE_URL and truncates. Integration tests SKIP
-// (never fail) when the variable is unset, exactly as the Day 1 API tests do.
+// (never fail) when the variable is unset, exactly as the API tests do.
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")

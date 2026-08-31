@@ -91,7 +91,7 @@ type recorder struct {
 }
 
 // newFakeProvider stands an httptest server in for api.openai.com and returns a
-// provider pointed at it (REQ-1.5: base URL overridable so fakes are possible).
+// provider pointed at it (the base URL is overridable so fakes are possible).
 func newFakeProvider(t *testing.T, status int, body string) (*llm.OpenAI, *recorder) {
 	t.Helper()
 	rec := &recorder{}
@@ -147,7 +147,7 @@ type wantMessage struct {
 	content string
 }
 
-// TEST-1.2: Generate/GenerateWithTools against an httptest fake — request shape
+// Generate/GenerateWithTools against an httptest fake — request shape
 // (model, messages, tools) and response mapping (text, tool calls, tokens).
 func TestOpenAIGenerate(t *testing.T) {
 	toolCallBody, _ := json.Marshal(map[string]any{
@@ -355,7 +355,7 @@ func TestOpenAIGenerate(t *testing.T) {
 }
 
 // A tool result turn must be replayable: the assistant's tool_calls and the
-// matching tool message both have to reach the API (REQ-1.5 Message shape).
+// matching tool message both have to reach the API (the Message shape).
 func TestOpenAIGenerateSendsToolResultTurn(t *testing.T) {
 	p, rec := newFakeProvider(t, http.StatusOK, completionBody("done", 9, 1))
 
@@ -399,7 +399,7 @@ func TestOpenAIGenerateSendsToolResultTurn(t *testing.T) {
 	}
 }
 
-// TEST-1.2 (Embed half of REQ-1.5): vectors come back in input order even when
+// The Embed half of the provider: vectors come back in input order even when
 // the API returns them shuffled.
 func TestOpenAIEmbed(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{
@@ -457,7 +457,7 @@ func TestOpenAIEmbedEdgeCases(t *testing.T) {
 	})
 }
 
-// REQ-1.5: an empty BaseURL must still produce a usable client pointed at the
+// An empty BaseURL must still produce a usable client pointed at the
 // public API, not at an empty endpoint.
 func TestNewOpenAIDefaultsBaseURL(t *testing.T) {
 	t.Setenv("OPENAI_BASE_URL", "")

@@ -1,5 +1,5 @@
 // Humanized timestamps for listing rows: "3h ago", "2d ago", then a date.
-// Testable pure functions — the countdown formatter is asserted by TEST-7.5.
+// Testable pure functions — the countdown formatter has its own unit tests.
 
 // humanizeDate renders an RFC 3339 timestamp relative to now.
 export function humanizeDate(iso: string | null): string {

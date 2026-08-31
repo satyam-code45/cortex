@@ -14,7 +14,7 @@ import (
 	"cortex/internal/llm"
 )
 
-// TEST-7.2 — the run executes on its OWNER's key (REQ-7.2).
+// The run executes on its OWNER's key.
 //
 // ProviderForUser is how the worker builds each run's completion provider from
 // the owner's stored key. These tests assert the ownership cut from outside:

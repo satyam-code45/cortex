@@ -40,7 +40,7 @@ const dbConnectTimeout = 10 * time.Second
 type Options struct {
 	// BYOK makes the orchestrator run each investigation as its owner
 	// (cmd/server): on the owner's stored LLM key, and against the owner's
-	// connected sources (Day 8) — or the full demo workspace when they have
+	// connected sources — or the full demo workspace when they have
 	// none. Off — cmd/eval — every run uses the server's key and the full
 	// demo registry: the eval is a server-initiated operation and must never
 	// borrow a user's key or credentials, in either direction.
@@ -138,7 +138,7 @@ func build(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, logger *
 		// Passed explicitly rather than left to the zero value. rag.Config
 		// treats a zero OverlapTokens as "no overlap" — a legitimate thing for a
 		// caller to ask for — so omitting it here silently indexed production
-		// with none, against REQ-4.5's 500/50.
+		// with none, instead of the intended 500-token chunks / 50 overlap.
 		ChunkTokens:   rag.DefaultChunkTokens,
 		OverlapTokens: rag.DefaultOverlapTokens,
 		Logger:        logger,
@@ -190,7 +190,7 @@ func build(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, logger *
 		Logger:             logger,
 	}
 	if opts.BYOK {
-		// The completion/embedding cut (REQ-7.2, amended spec): completions run
+		// The completion/embedding cut: completions run
 		// on the run owner's key via this factory; embeddings — the indexer
 		// above and the knowledge_base query embedder below — stay on the
 		// server's `provider`, because they read the server's own index and the
@@ -218,7 +218,7 @@ func build(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, logger *
 			}), nil
 		}
 
-		// The same cut for tools (REQ-8.4): each run's registry is built from
+		// The same cut for tools: each run's registry is built from
 		// its owner's source connections — all demo or all theirs, never
 		// mixed. The demo registry instance is shared so its per-upstream
 		// pacing state stays shared across demo-mode runs.

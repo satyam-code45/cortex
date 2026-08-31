@@ -14,8 +14,9 @@ import (
 // Write operations, used only by cmd/seed.
 //
 // No agent tool calls anything in this file. The agent's Jira surface is
-// read-only by design (idea.md §25 tool guardrails); seeding is an operator
-// action performed by a CLI, which is a different trust boundary entirely.
+// read-only by design — nothing a model can invoke mutates Jira; seeding is an
+// operator action performed by a CLI, which is a different trust boundary
+// entirely.
 //
 // These exist because Jira history cannot be fabricated. The REST API refuses
 // to backdate `created` or to insert changelog rows, so the only way
@@ -59,7 +60,7 @@ type Account struct {
 }
 
 // Myself returns the account the API token authenticates as. It doubles as
-// the live credential check for the paste-a-key connection flow (Day 8): a
+// the live credential check for the paste-a-key connection flow: a
 // bad token surfaces here as an APIError before anything is stored.
 func (c *Client) Myself(ctx context.Context) (Account, error) {
 	var user userValue
@@ -246,7 +247,7 @@ func (c *Client) CreateIssue(ctx context.Context, spec IssueSpec) (string, error
 	// seed over a field nothing depends on.
 	//
 	// The ordering matters and is not cosmetic. `priority` is decorative, but the
-	// owner label is the only structured record of the intended assignee (REQ-2.5)
+	// owner label is the only structured record of the intended assignee
 	// and the due date is the "original deadline" that evals/ground_truth.json
 	// asserts. Shedding those silently would leave the changelog reading
 	// "none → 2026-07-10" and make the eval fact unanswerable, so they go last and

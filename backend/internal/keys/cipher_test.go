@@ -8,7 +8,7 @@ import (
 	"cortex/internal/keys"
 )
 
-// TEST-7.2 — encryption at rest (REQ-7.2).
+// Encryption at rest for stored keys.
 //
 // The stored blob must never be the plaintext key, must round-trip back to it
 // under the same secret, and must be useless under any other secret: rotation

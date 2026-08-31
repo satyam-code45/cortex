@@ -8,7 +8,7 @@ import (
 	"cortex/internal/llm"
 )
 
-// TEST-6.4 — estimateTokens, the pure function the context guard is built on.
+// estimateTokens, the pure function the context guard is built on.
 //
 // It is deliberately an estimator with no provider: the guard's trigger has to
 // be deterministic and testable. It must count everything that is re-sent to

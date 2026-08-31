@@ -17,7 +17,7 @@ import (
 // collide.
 const connectStateCookiePath = "/api/connections"
 
-// handleGmailConnect starts the Gmail connect flow (REQ-8.3): mint state +
+// handleGmailConnect starts the Gmail connect flow: mint state +
 // PKCE, park them in a short-lived cookie, and send the browser to Google's
 // consent screen asking for gmail.readonly only.
 //
@@ -152,7 +152,7 @@ func (s *Server) redirectConnections(w http.ResponseWriter, r *http.Request, que
 	http.Redirect(w, r, s.deps.FrontendOrigin+"/connections?"+query, http.StatusFound)
 }
 
-// gmailWebCredentials shapes the Day 7 Web OAuth client for the gmail
+// gmailWebCredentials shapes the sign-in Web OAuth client for the gmail
 // package. TokenURI comes from the same client the exchange used, so tests
 // that point OIDC at a fake Google cover this too.
 func (s *Server) gmailWebCredentials() *gmail.Credentials {

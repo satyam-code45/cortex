@@ -8,12 +8,12 @@ import (
 	"cortex/internal/rag"
 )
 
-// TEST-4.1 — the chunker.
+// The chunker.
 //
-// The spec asks for four properties (specs/day-4.md, Test requirements):
+// Four properties are required:
 // a short document produces one chunk, a long one carries the right overlap,
 // paragraph boundaries are preferred, and the token caps are exact. "Exact" is
-// exactness against rag.EstimateTokens — amendment A5 makes that function the
+// exactness against rag.EstimateTokens — by design that function is the
 // single definition of "token" the chunker enforces its caps against, precisely
 // so this test can be written at all.
 //

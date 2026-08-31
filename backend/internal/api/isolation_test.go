@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// Day 7 integration requirement: two users, one Postgres — user B must not be
+// Multi-user isolation requirement: two users, one Postgres — user B must not be
 // able to list user A's conversations or read A's runs. Ownership is part of
 // every lookup, so a foreign resource is indistinguishable from a missing one.
 

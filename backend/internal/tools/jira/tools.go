@@ -14,9 +14,10 @@ import (
 
 // The four read-only Jira tools.
 //
-// Read-only is a deliberate boundary (idea.md §25): the agent gets search and
-// retrieval, never create/update/delete. The seeder writes, but it is a CLI the
-// operator runs — not something the model can reach.
+// Read-only is a deliberate boundary: the agent gets search and retrieval,
+// never create/update/delete, so no question a user asks can mutate Jira. The
+// seeder writes, but it is a CLI the operator runs — not something the model
+// can reach.
 
 const (
 	// sourceJira labels evidence produced by this package.

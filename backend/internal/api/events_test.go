@@ -19,9 +19,9 @@ import (
 	"cortex/internal/api"
 )
 
-// TEST-5.1 — the SSE endpoint GET /api/runs/{id}/events (REQ-5.1).
+// The SSE endpoint GET /api/runs/{id}/events.
 //
-// The wire contract under test, straight from the spec:
+// The wire contract under test:
 //
 //	id: <seq>
 //	event: <type>

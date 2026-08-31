@@ -12,10 +12,10 @@ import (
 	"cortex/internal/tools"
 )
 
-// TEST-2.5 — run_events reconstruction.
+// run_events reconstruction.
 //
-// REQ-2.3 requires run_events payloads to be "complete enough to reconstruct the
-// loop transcript", because Day 6's pause/resume has no in-process state to
+// run_events payloads must be "complete enough to reconstruct the
+// loop transcript", because pause/resume has no in-process state to
 // resume from: continuing a run means rebuilding the conversation from the log.
 // The test for that is an equality, not an inspection — rebuild the transcript
 // from the rows alone and compare it to the one the loop actually handed the
@@ -97,7 +97,7 @@ func TestReconstructTranscriptMatchesTheLoop(t *testing.T) {
 	// 2 history turns + the question + (assistant, observation) + (assistant,
 	// observation, observation) = 8, plus the draft answer and the completeness
 	// check injected before that answer is accepted = 10, plus the accepted
-	// answer and the citation instruction injected by the Day 4 citation pass =
+	// answer and the citation instruction injected by the citation pass =
 	// 12. All four of those injected turns are turns the model saw, so a replay
 	// that omits them resumes from a conversation that never happened.
 	if len(messages) != 12 {
@@ -107,9 +107,9 @@ func TestReconstructTranscriptMatchesTheLoop(t *testing.T) {
 
 // A run cut off by the iteration cap must be reconstructable too.
 //
-// REQ-2.2 step 4 appends a "best effort from evidence so far" user instruction
-// to the transcript before the final Generate call, and REQ-2.3 requires
-// run_events payloads to be "complete enough to reconstruct the loop
+// The cap path appends a "best effort from evidence so far" user instruction
+// to the transcript before the final Generate call, and
+// run_events payloads must be "complete enough to reconstruct the loop
 // transcript". That instruction is a turn the model saw, so a replay that omits
 // it continues from a conversation that never happened.
 func TestReconstructTranscriptCoversForcedAnswerRun(t *testing.T) {

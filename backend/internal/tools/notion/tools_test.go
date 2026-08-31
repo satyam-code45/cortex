@@ -13,12 +13,12 @@ import (
 	"cortex/internal/tools/notion"
 )
 
-// TEST-3.2 — the two Notion tools against recorded fixtures.
+// The two Notion tools against recorded fixtures.
 //
-// Two things are checked at once. Field mapping: REQ-3.1 says notion_search
+// Two things are checked at once. Field mapping: notion_search
 // returns page id, title, last_edited and url, and notion_get_page returns the
 // page's blocks as markdown — nothing wider. And Evidence: every tool result
-// must carry it (CLAUDE.md makes that non-negotiable), because Day 4's
+// must carry it (the tool contract makes that non-negotiable), because the
 // citations are built by joining an answer back to evidence rows, and a tool
 // that returns content without evidence produces claims nothing can source.
 
@@ -42,7 +42,7 @@ func mustTime(t *testing.T, value string) time.Time {
 	return parsed
 }
 
-// assertEvidence checks the invariants REQ-3.1 puts on a Notion EvidenceItem:
+// assertEvidence checks the invariants required of a Notion EvidenceItem:
 // the source system, the page id, the title, a clickable URL, a non-empty
 // snippet, and a last-edited timestamp that is either absent or right — never
 // the zero time.
@@ -98,18 +98,18 @@ func TestSearchPagesFieldMappingAndEvidence(t *testing.T) {
 	if req.method != http.MethodPost {
 		t.Errorf("method = %s, want POST", req.method)
 	}
-	// REQ-3.1: the version header is pinned, not tracked.
+	// The version header is pinned, not tracked.
 	if got := req.header.Get("Notion-Version"); got != notion.APIVersion {
 		t.Errorf("Notion-Version = %q, want the pinned %q", got, notion.APIVersion)
 	}
 	if notion.APIVersion != "2026-03-11" {
-		t.Errorf("pinned APIVersion = %q, want 2026-03-11 (REQ-3.1)", notion.APIVersion)
+		t.Errorf("pinned APIVersion = %q, want 2026-03-11", notion.APIVersion)
 	}
 	if got := req.header.Get("Authorization"); got != "Bearer "+testToken {
 		t.Errorf("Authorization = %q, want the bearer integration secret", got)
 	}
 
-	// REQ-3.1: pages only, in the 2025-09-03+ vocabulary (`page`, never
+	// Pages only, in the 2025-09-03+ vocabulary (`page`, never
 	// `database`).
 	var body struct {
 		Query  string `json:"query"`
@@ -159,7 +159,7 @@ func TestSearchPagesFieldMappingAndEvidence(t *testing.T) {
 		"2026-06-02T08:00:00Z")
 }
 
-// REQ-3.1 lists the compact search result as "page id, title, last_edited,
+// The compact search result is "page id, title, last_edited,
 // url" — four fields, and the Evidence contract is stated separately on the
 // next line, so the URL is owed to the model in the observation itself and not
 // only to the citation layer.
@@ -172,7 +172,7 @@ func TestSearchPagesContentCarriesTheURL(t *testing.T) {
 	result := mustExecute(t, tool, `{"query":"Atlas"}`)
 
 	if !strings.Contains(result.Content, testPageURL) {
-		t.Errorf("content omits the page URL %q, which REQ-3.1 lists among the compact result fields\ngot:\n%s",
+		t.Errorf("content omits the page URL %q, one of the compact result fields\ngot:\n%s",
 			testPageURL, result.Content)
 	}
 }
@@ -217,7 +217,7 @@ func TestGetPageRendersMarkdownWithEvidence(t *testing.T) {
 	result := mustExecute(t, tool, `{"page_id":"`+testPageID+`"}`)
 
 	// The page itself, then its blocks, then the nested block's children:
-	// REQ-3.1 requires recursion to depth 2.
+	// the converter recurses to depth 2 and no further.
 	if n := len(fake.requestsTo(pathPage)); n != 1 {
 		t.Errorf("requests to %s = %d, want 1", pathPage, n)
 	}
@@ -335,7 +335,7 @@ func TestServerErrorIsRetryable(t *testing.T) {
 	}
 }
 
-// The Notion tool set is exactly the two read-only tools REQ-3.1 names. The
+// The Notion tool set is exactly the two read-only tools. The
 // agent must not be handed a way to write to the workspace.
 func TestToolSetIsReadOnly(t *testing.T) {
 	fake := newFakeNotion(t, map[string]*route{})

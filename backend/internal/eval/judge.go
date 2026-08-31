@@ -148,7 +148,7 @@ func (g *Grader) judge(ctx context.Context, system, user string) MetricResult {
 	return MetricResult{Pass: v.Pass, Detail: v.Reasoning}
 }
 
-// Prompt builders are pure functions so TEST-6.1 can pin their content
+// Prompt builders are pure functions so tests can pin their content
 // without a provider.
 
 func correctnessSystemPrompt(c Case) string {

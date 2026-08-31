@@ -9,9 +9,9 @@ import (
 	"cortex/internal/api"
 )
 
-// TEST-5.2 — CORS admits exactly the one configured frontend origin (A3).
+// CORS admits exactly the one configured frontend origin.
 //
-// The policy under test, from the spec: Access-Control-Allow-Origin is the
+// The policy under test: Access-Control-Allow-Origin is the
 // configured origin and appears on plain GETs too (EventSource never
 // preflights but enforces CORS on the response), preflight OPTIONS is answered
 // 204 with Allow-Methods "GET, POST, PUT, DELETE, OPTIONS" and Allow-Headers
@@ -126,7 +126,7 @@ func TestCORSAdmitsOnlyTheConfiguredOrigin(t *testing.T) {
 				if allowOrigin != testFrontendOrigin {
 					t.Errorf("Access-Control-Allow-Origin = %q, want %q", allowOrigin, testFrontendOrigin)
 				}
-				// PUT and DELETE joined for /api/settings/llm-key (Day 7).
+				// PUT and DELETE joined for /api/settings/llm-key.
 				const wantAllowMethods = "GET, POST, PUT, DELETE, OPTIONS"
 				if got := rec.Header().Get("Access-Control-Allow-Methods"); got != wantAllowMethods {
 					t.Errorf("Access-Control-Allow-Methods = %q, want %q", got, wantAllowMethods)

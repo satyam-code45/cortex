@@ -17,7 +17,8 @@ const testModel = "gpt-4o-test"
 
 // chatBody is the POST /api/chat success shape.
 //
-// Day 2 removed `answer`: the handler queues a run and returns immediately, so
+// Moving runs onto the queue removed `answer`: the handler enqueues and returns
+// immediately, so
 // there is nothing to answer with yet. The outcome is read from
 // GET /api/runs/{id}.
 type chatBody struct {

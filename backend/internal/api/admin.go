@@ -36,7 +36,7 @@ type indexResponse struct {
 // request. The work happens in the River workers, and `make index` is a curl at
 // this endpoint.
 //
-// Admin-gated (REQ-7.3): the bearer token qualifies, and so does a session
+// Admin-gated: the bearer token qualifies, and so does a session
 // whose email is in ADMIN_EMAILS. Everyone else gets 403 — the user-facing
 // path to a reindex is POST /api/documents/refresh, which carries its own
 // cooldown instead of an admin check.

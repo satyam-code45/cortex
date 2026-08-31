@@ -7,8 +7,8 @@ import (
 	"cortex/internal/eval"
 )
 
-// TEST-6.1 — summary aggregation (REQ-6.2: "summary table — pass rates per
-// metric and category").
+// Summary aggregation: the summary table reports pass rates per
+// metric and category.
 
 func TestSummarize(t *testing.T) {
 	pass := eval.MetricResult{Pass: true}

@@ -17,8 +17,8 @@ import (
 	"cortex/internal/tools"
 )
 
-// TEST-8.4 — the worker builds each run's tool registry from the run OWNER's
-// connections (REQ-8.4), asserted from outside the orchestrator: the resolver
+// The worker builds each run's tool registry from the run OWNER's
+// connections, asserted from outside the orchestrator: the resolver
 // is asked for exactly the run's owner, the run executes against the registry
 // it returned (never the demo one), run_started records an honest sources map,
 // and a run with no usable sources fails with the reconnect pointer instead of

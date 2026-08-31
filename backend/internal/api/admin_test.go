@@ -11,7 +11,7 @@ import (
 	"cortex/internal/api"
 )
 
-// REQ-4.5's trigger: POST /api/admin/index enqueues one job per source, or one
+// The indexing trigger: POST /api/admin/index enqueues one job per source, or one
 // job for the source named in the body.
 //
 // It is queued rather than performed inline because a full crawl of three

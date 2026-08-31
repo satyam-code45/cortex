@@ -19,8 +19,8 @@ import (
 // features are built directly on it, which is why its completeness is a hard
 // requirement rather than a nice-to-have:
 //
-//   - Day 5's trace panel streams these rows to the browser as they land.
-//   - Day 6's pause/resume and human-in-the-loop approval gates reconstruct the
+//   - The trace panel streams these rows to the browser as they land.
+//   - Pause/resume and human-in-the-loop approval gates reconstruct the
 //     model's message transcript from them and continue the loop from there.
 //
 // The second is the demanding one. It means every event that contributed to the
@@ -93,8 +93,9 @@ type runStartedPayload struct {
 
 // sourcesPayload records which workspace the run's tools reached — the demo
 // workspace or the owner's connected sources — so a trace is honest about
-// what it searched. Events written before Day 8 unmarshal it to the zero
-// value, which readers treat as "recorded before sources were tracked".
+// what it searched. Events written before per-user connections existed
+// unmarshal it to the zero value, which readers treat as "recorded before
+// sources were tracked".
 type sourcesPayload struct {
 	Mode      string   `json:"mode"`
 	Connected []string `json:"connected"`
@@ -119,7 +120,7 @@ type llmCallPayload struct {
 	//
 	// They have to be recorded or the transcript cannot be rebuilt: a replay of a
 	// capped run would omit the very instruction that produced its answer, and
-	// Day 6's resume would continue from a conversation that never happened.
+	// a resume would continue from a conversation that never happened.
 	InjectedMessages []eventMessage  `json:"injected_messages,omitempty"`
 	MessageCount     int             `json:"message_count"`
 	Text             string          `json:"text"`
@@ -281,8 +282,12 @@ func (c eventToolCall) arguments() json.RawMessage {
 	return c.Arguments
 }
 
-// eventEvidence is an evidence item as stored in an event payload. Day 4 gives
-// evidence its own table; until then the transcript is where it lives.
+// eventEvidence is an evidence item as stored in an event payload.
+//
+// Evidence lives in two places on purpose, and both are load-bearing: the
+// evidence table is what citations join against, while this copy inside the
+// tool_result payload is what makes a run replayable from run_events alone.
+// Dropping it would silently break transcript reconstruction.
 type eventEvidence struct {
 	Source     string `json:"source"`
 	ExternalID string `json:"external_id"`
@@ -348,7 +353,7 @@ func ReconstructTranscript(events []store.RunEvent) (system string, messages []l
 			// So a new run_started supersedes everything before it. Without this
 			// reset a resumed run would rebuild as
 			// history+attempt1+history+attempt2 — a conversation the model never
-			// saw — and Day 6 would continue from it.
+			// saw — and a resume would continue from it.
 			system = payload.SystemPrompt
 			messages = messages[:0]
 			for _, m := range payload.History {

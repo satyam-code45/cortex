@@ -55,8 +55,9 @@ type Enqueuer interface {
 
 // Deps are the collaborators the handlers need.
 //
-// There is no LLM provider here any more: since Day 2 the handlers only record
-// and report on runs, and every model call happens in the River worker.
+// There is no LLM provider here any more: since runs went asynchronous the
+// handlers only record and report on runs, and every model call happens in the
+// River worker.
 type Deps struct {
 	// DB is the connection pool used for queries and transactions.
 	DB DB
@@ -97,7 +98,7 @@ type Deps struct {
 	// it at an httptest server.
 	OpenAIBaseURL string
 
-	// Connections stores and reports users' source connections (Day 8).
+	// Connections stores and reports users' source connections.
 	Connections *connections.Service
 	// NotionBaseURL overrides the endpoint Notion token validation calls;
 	// tests point it at an httptest server. (Jira needs no equivalent — the

@@ -24,15 +24,15 @@ import (
 
 // Test support for the agent loop.
 //
-// TEST-2.1 names the scripted fake Provider as "the key test asset": every loop
+// The scripted fake Provider is the key test asset: every loop
 // behaviour worth asserting (an answer, a tool call, the iteration cap, a bad
 // argument, a failing tool, an oversized result) is a property of what the model
 // returns, so the model is the thing that has to be scriptable. Everything here
-// is hand-written — the locked stack (CLAUDE.md) carries no test dependencies.
+// is hand-written — the locked stack carries no test dependencies.
 //
 // The orchestrator writes its whole transcript through store.Querier, so these
 // tests need a real Postgres and skip when TEST_DATABASE_URL is unset, exactly
-// like the Day 1 API integration tests.
+// like the API package's integration tests.
 
 // ---------------------------------------------------------------------------
 // scripted provider
@@ -41,7 +41,7 @@ import (
 // callKind distinguishes the three provider entry points the loop uses:
 // GenerateWithTools for a reasoning turn, Generate for the utility-model
 // summary and for the forced final answer, and GenerateStructured for the
-// Day 4 citation pass.
+// citation pass.
 type callKind int
 
 const (
@@ -68,8 +68,8 @@ func (k callKind) String() string {
 type providerStep struct {
 	// kind, when not anyCall, asserts which provider method the loop reached.
 	kind callKind
-	// assert runs extra checks on the request that triggered this step. TEST-2.2
-	// uses it to assert the summarization call's shape from inside the fake.
+	// assert runs extra checks on the request that triggered this step. The
+	// summarization tests use it to assert that call's shape from inside the fake.
 	assert func(t *testing.T, call recordedCall)
 
 	text         string
@@ -166,7 +166,7 @@ func (p *fakeProvider) respond(call recordedCall) (llm.Response, error) {
 	// have to carry a step about answer-checking. A script that runs out anywhere
 	// else is still the drift these tests exist to catch.
 	if exhausted {
-		// The Day 4 citation pass runs after every answered run, and its shape
+		// The citation pass runs after every answered run, and its shape
 		// is the same for every test that is not about citations: echo the draft
 		// back with nothing cited. Scripting it into thirty unrelated tests would
 		// be noise, so the default is supplied here and a citation test overrides
@@ -548,7 +548,7 @@ func loadEvents(t *testing.T, pool *pgxpool.Pool, runID uuid.UUID) []store.RunEv
 	return events
 }
 
-// eventTypes lists the event types in order, which is the Day 5 SSE contract.
+// eventTypes lists the event types in order, which is the SSE streaming contract.
 func eventTypes(events []store.RunEvent) []string {
 	out := make([]string, 0, len(events))
 	for _, e := range events {

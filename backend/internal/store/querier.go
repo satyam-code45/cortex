@@ -20,7 +20,7 @@ type Querier interface {
 	// Per-source tab counts under the same filters as ListDocuments, so the tabs
 	// and the list never disagree.
 	CountDocumentsFiltered(ctx context.Context, arg CountDocumentsFilteredParams) ([]CountDocumentsFilteredRow, error)
-	// Per-user rate limit (REQ-7.3): the shared cost of a run is Satyam's upstream
+	// Per-user rate limit: the shared cost of a run is Satyam's upstream
 	// API quotas even when the LLM spend is the user's. $2 is a timestamp rather
 	// than a hardcoded interval so tests can pin the window.
 	CountUserRunsSince(ctx context.Context, arg CountUserRunsSinceParams) (int64, error)
@@ -107,7 +107,7 @@ type Querier interface {
 	ListRunEventsByRunAfterSeq(ctx context.Context, arg ListRunEventsByRunAfterSeqParams) ([]RunEvent, error)
 	ListToolCallsByRun(ctx context.Context, agentRunID uuid.UUID) ([]ToolCall, error)
 	ListUserConnections(ctx context.Context, userID uuid.UUID) ([]UserConnection, error)
-	// The join is the point (idea.md §11): the vector index finds the chunk, and the
+	// The join is the point: the vector index finds the chunk, and the
 	// relational half supplies the title, URL and metadata that make it citable.
 	// Doing both in one query is only possible because the vectors live in the same
 	// Postgres as everything else.

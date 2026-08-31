@@ -1,7 +1,7 @@
 package main
 
 // The Jira half of the seeder: projects, issues, and the history replayed onto
-// them. Split out of main.go on Day 3, when Notion and Gmail joined it.
+// them. Split out of main.go when Notion and Gmail joined it.
 
 import (
 	"context"

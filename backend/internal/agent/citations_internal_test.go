@@ -5,14 +5,14 @@ import (
 	"testing"
 )
 
-// TEST-4.2 — the citation validator.
+// The citation validator.
 //
 // applyCitations is the hallucinated-citation guard, and it is unexported, so
 // this is an internal test (the same arrangement internal/jobs uses for its
 // timeout test). It is a pure function over the model's structured output, which
 // is what makes the guard assertable without a database, a provider or a run.
 //
-// The contract is REQ-4.3 as amended by A3:
+// The contract:
 //
 //   - evidence_id is the per-run evidence NUMBER, not a UUID. A number that is
 //     not present in this run's evidence is dropped.
@@ -281,7 +281,7 @@ func TestApplyCitations(t *testing.T) {
 			// Two invariants that must hold for every input, because the trace
 			// API and the rendered answer both depend on them:
 			//
-			//  1. markers persist as "[n]" (REQ-4.3),
+			//  1. markers persist as "[n]",
 			//  2. the numbers run 1..N in list order, and every one of them is
 			//     actually present in the answer text.
 			for i, c := range resolved {

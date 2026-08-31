@@ -20,7 +20,7 @@ import (
 // OAuth against Google.
 //
 // The generic pieces — PKCE, state, the consent URL, the code exchange, the
-// OAuth error shape — live in internal/auth since Day 7, shared with Google
+// OAuth error shape — live in internal/auth, shared with Google
 // sign-in. What stays here is the Gmail-flow specifics: the credential file
 // format, the on-disk token cache, the refreshing TokenSource, and the two
 // knobs a data-access flow needs that a sign-in must not have

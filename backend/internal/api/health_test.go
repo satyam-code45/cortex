@@ -10,7 +10,7 @@ import (
 	"cortex/internal/api"
 )
 
-// REQ-1.6: GET /healthz returns 200 {"status":"ok"} and checks the DB ping.
+// GET /healthz returns 200 {"status":"ok"} and checks the DB ping.
 func TestHealthz(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -51,7 +51,7 @@ func TestHealthz(t *testing.T) {
 	}
 }
 
-// NewRouter must tolerate a nil logger (REQ-1.6 wiring); it falls back to the
+// NewRouter must tolerate a nil logger; it falls back to the
 // default slog logger rather than panicking on the first request.
 func TestNewRouterWithNilLogger(t *testing.T) {
 	h := api.NewRouter(withTestAuth(api.Deps{DB: &stubDB{}, Enqueuer: &stubEnqueuer{}, Model: testModel}))
