@@ -126,6 +126,10 @@ type Deps struct {
 	// ConnectRedirectURI is where Google sends the browser after Gmail
 	// consent — must be registered on the Web OAuth client.
 	ConnectRedirectURI string
+	// PublicHostname is the hostname this API is reached at from outside, e.g.
+	// cortex-api.onrender.com. Empty for local development, where the
+	// loopback names are the only ones that should ever be answered to.
+	PublicHostname string
 	// GmailBaseURL overrides the Gmail API root for the connect flow's
 	// mailbox validation; tests point it at an httptest server.
 	GmailBaseURL string
@@ -152,7 +156,7 @@ func NewRouter(deps Deps) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(requestLogger(deps.Logger))
-	r.Use(hostCheck(deps.Logger))
+	r.Use(hostCheck(deps.Logger, deps.PublicHostname))
 	r.Use(middleware.Recoverer)
 
 	r.Get("/healthz", s.handleHealthz)

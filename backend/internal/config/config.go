@@ -105,6 +105,16 @@ type Config struct {
 	// API serves one first-party frontend, and a list would only invite
 	// wildcarding later.
 	FrontendOrigin string
+	// APIPublicURL is the origin this API is reached at from outside, e.g.
+	// https://cortex-api.onrender.com. Empty for local development.
+	//
+	// One value because two separate things need the same fact, and letting
+	// them drift apart is how a deployment breaks in confusing ways. The
+	// hostname goes into the Host-header allowlist, without which a hosted
+	// deployment answers 421 to everything including its own health check; and
+	// the origin builds the OAuth redirect URIs, which Google matches as exact
+	// strings and which otherwise point at localhost from a public site.
+	APIPublicURL string
 
 	// OpenAIAPIKey authenticates against the OpenAI API (required).
 	OpenAIAPIKey string
@@ -220,7 +230,7 @@ type Config struct {
 // message. A test that dumped this struct on mismatch is exactly how a real
 // token ends up in captured output.
 func (c Config) String() string {
-	return fmt.Sprintf("Config{DatabaseURL:%s Host:%s Port:%s FrontendOrigin:%s "+
+	return fmt.Sprintf("Config{DatabaseURL:%s Host:%s Port:%s FrontendOrigin:%s APIPublicURL:%s "+
 		"OpenAIAPIKey:%s OpenAIBaseURL:%s LLMModel:%s LLMUtilityModel:%s EmbeddingModel:%s "+
 		"MaxIterations:%d AgentRunWorkers:%d ContextTokenBudget:%d IndexMaxDocuments:%d IndexWorkers:%d "+
 		"JiraBaseURL:%s JiraEmail:%s JiraAPIToken:%s "+
@@ -230,7 +240,7 @@ func (c Config) String() string {
 		"AuthAPIToken:%s AdminEmails:%s DevUserEmail:%s LLMKeyEncryptionSecret:%s "+
 		"RunsPerUserPerHour:%d IndexRefreshCooldown:%s "+
 		"ActionTTL:%s WritesPerUserPerHour:%d WriteActionWorkers:%d GmailSendAllowedDomains:%s}",
-		redactDSN(c.DatabaseURL), c.Host, c.Port, c.FrontendOrigin,
+		redactDSN(c.DatabaseURL), c.Host, c.Port, c.FrontendOrigin, c.APIPublicURL,
 		redact(c.OpenAIAPIKey), c.OpenAIBaseURL, c.LLMModel, c.LLMUtilityModel, c.EmbeddingModel,
 		c.MaxIterations, c.AgentRunWorkers, c.ContextTokenBudget, c.IndexMaxDocuments, c.IndexWorkers,
 		c.JiraBaseURL, c.JiraEmail, redact(c.JiraAPIToken),
@@ -280,6 +290,7 @@ func Load() (*Config, error) {
 		Host:            envOr("HOST", DefaultHost),
 		Port:            envOr("PORT", DefaultPort),
 		FrontendOrigin:  strings.TrimRight(envOr("FRONTEND_ORIGIN", DefaultFrontendOrigin), "/"),
+		APIPublicURL:    strings.TrimRight(strings.TrimSpace(os.Getenv("API_PUBLIC_URL")), "/"),
 		OpenAIAPIKey:    os.Getenv("OPENAI_API_KEY"),
 		OpenAIBaseURL:   os.Getenv("OPENAI_BASE_URL"),
 		LLMModel:        envOr("LLM_MODEL", DefaultLLMModel),

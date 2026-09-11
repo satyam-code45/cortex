@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -42,6 +43,33 @@ const (
 	// for its LLM calls, so finishing is cheaper than retrying from the start.
 	queueDrainTimeout = 60 * time.Second
 )
+
+// apiOrigin is the scheme-and-host this API is reached at, used to build the
+// OAuth redirect URIs.
+//
+// Google matches redirect URIs as exact strings, so these have to be the URL a
+// browser actually arrives on: a hosted deployment that kept the localhost form
+// would send the user's browser to their own machine after consent. Falls back
+// to localhost so local development needs no configuration.
+func apiOrigin(cfg *config.Config) string {
+	if cfg.APIPublicURL != "" {
+		return cfg.APIPublicURL
+	}
+	return "http://localhost:" + cfg.Port
+}
+
+// publicHostname is the bare hostname of APIPublicURL, for the Host-header
+// allowlist. Empty when this is a local run, where only loopback is answered to.
+func publicHostname(cfg *config.Config) string {
+	if cfg.APIPublicURL == "" {
+		return ""
+	}
+	parsed, err := url.Parse(cfg.APIPublicURL)
+	if err != nil {
+		return ""
+	}
+	return parsed.Hostname()
+}
 
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -149,10 +177,15 @@ func run(logger *slog.Logger) error {
 		"writes_enabled", writeWorker != nil,
 		"tools", deps.Registry.Len())
 
-	// Auth exists (Google sign-in), but hostCheck still only admits localhost names —
-	// exposing beyond loopback needs that list widened too, so say so.
-	if !isLoopback(cfg.Host) {
-		logger.Warn("server is bound beyond loopback; hostCheck only admits localhost Host headers",
+	// Binding beyond loopback is only safe once the Host allowlist knows the
+	// name this server is reached at. With API_PUBLIC_URL set that is handled;
+	// without it, hostCheck answers 421 to every request that is not addressed
+	// to localhost — including the platform's own health check, which reads as
+	// a service that never started rather than as a misconfiguration. So the
+	// warning fires for exactly that case and names the variable that fixes it.
+	if !isLoopback(cfg.Host) && cfg.APIPublicURL == "" {
+		logger.Warn("server is bound beyond loopback with no API_PUBLIC_URL set; "+
+			"every request not addressed to localhost will be refused with 421",
 			"host", cfg.Host)
 	}
 
@@ -172,11 +205,12 @@ func run(logger *slog.Logger) error {
 				TokenURL: auth.GoogleTokenURL,
 			},
 			JWKS:        auth.NewJWKSCache(auth.GoogleJWKSURL, nil),
-			RedirectURI: "http://localhost:" + cfg.Port + "/api/auth/google/callback",
+			RedirectURI: apiOrigin(cfg) + "/api/auth/google/callback",
 		},
 		Keys:                 deps.Keys,
 		Connections:          deps.Connections,
-		ConnectRedirectURI:   "http://localhost:" + cfg.Port + "/api/connections/gmail/callback",
+		ConnectRedirectURI:   apiOrigin(cfg) + "/api/connections/gmail/callback",
+		PublicHostname:       publicHostname(cfg),
 		APIToken:             cfg.AuthAPIToken,
 		BearerEmail:          cfg.DevUserEmail,
 		AllowedEmails:        lowered(cfg.AuthAllowedEmails),

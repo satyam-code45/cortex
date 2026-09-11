@@ -5,7 +5,21 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"cortex/internal/api"
 )
+
+// newPublicHostRouter is newChatRouter with a deployment's public hostname
+// configured, which is what a hosted run passes.
+func newPublicHostRouter(db api.DB, enqueuer api.Enqueuer, public string) http.Handler {
+	return api.NewRouter(withTestAuth(api.Deps{
+		DB:             db,
+		Enqueuer:       enqueuer,
+		Model:          testModel,
+		Logger:         discardLogger(),
+		PublicHostname: public,
+	}))
+}
 
 // The Host check is what closes DNS rebinding.
 //
@@ -59,6 +73,75 @@ func TestRejectsUnexpectedHost(t *testing.T) {
 				t.Errorf("status = %d, want %d (body %q)", rec.Code, tt.wantStatus, rec.Body.String())
 			}
 		})
+	}
+}
+
+// A hosted deployment answers to its own public hostname, and to nothing else
+// it was not told about.
+//
+// Without this the check rejects every request a hosted deployment receives —
+// including its own health check, which a platform reads as "the service never
+// started". The allowlist stays closed, though: configuring one public name
+// must not turn the check into a wildcard, or the rebinding defence the rest of
+// this file is about would be gone in production and present only locally.
+func TestAnswersToTheConfiguredPublicHostname(t *testing.T) {
+	t.Parallel()
+
+	const public = "cortex-api.onrender.com"
+
+	tests := []struct {
+		name       string
+		host       string
+		wantStatus int
+	}{
+		{name: "the configured public name", host: public, wantStatus: http.StatusOK},
+		{name: "with a port", host: public + ":443", wantStatus: http.StatusOK},
+		{name: "case-insensitive", host: "Cortex-API.OnRender.com", wantStatus: http.StatusOK},
+		{name: "loopback still works", host: "localhost:8080", wantStatus: http.StatusOK},
+		{
+			name:       "another host on the same platform is refused",
+			host:       "someone-else.onrender.com",
+			wantStatus: http.StatusMisdirectedRequest,
+		},
+		{
+			// The same bypass as above, against the configured name this time.
+			name:       "a name merely containing the public one is refused",
+			host:       public + ".attacker.example.com",
+			wantStatus: http.StatusMisdirectedRequest,
+		},
+		{name: "an unrelated host is refused", host: "attacker.example.com", wantStatus: http.StatusMisdirectedRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			h := newPublicHostRouter(&stubDB{}, &stubEnqueuer{}, public)
+
+			req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+			req.Host = tt.host
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d (body %q)", rec.Code, tt.wantStatus, rec.Body.String())
+			}
+		})
+	}
+}
+
+// A local run must answer to loopback only, whatever a deployment would allow.
+func TestWithNoPublicHostnameOnlyLoopbackIsAnswered(t *testing.T) {
+	t.Parallel()
+
+	h := newPublicHostRouter(&stubDB{}, &stubEnqueuer{}, "")
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Host = "cortex-api.onrender.com"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMisdirectedRequest {
+		t.Errorf("status = %d, want 421 — an unconfigured deployment name is not allowed",
+			rec.Code)
 	}
 }
 

@@ -1,0 +1,103 @@
+# Render blueprint for the Cortex API.
+#
+# The frontend is not here: it goes to Vercel, which is where a Next.js app
+# belongs. This file is the Go binary and nothing else.
+#
+# Postgres is not here either. Render's own Postgres has no pgvector on the free
+# tier, and Cortex keeps its vectors in the same database as everything else by
+# design — so the database is Neon, supplied through DATABASE_URL.
+#
+# Every secret is marked `sync: false`, which means Render prompts for it rather
+# than reading it from this file. Nothing in here is a credential, so it is safe
+# to commit.
+
+services:
+  - type: web
+    name: cortex-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    region: oregon
+    healthCheckPath: /healthz
+
+    envVars:
+      # --- binding -------------------------------------------------------
+      # 0.0.0.0 is also set in the Dockerfile; it is repeated here because
+      # this file is what a person reads when the service is unreachable.
+      - key: HOST
+        value: 0.0.0.0
+
+      # The public origin of THIS service. Two things depend on it and both
+      # fail confusingly without it: the Host-header allowlist (otherwise
+      # every request including the health check is refused with 421) and the
+      # Google OAuth redirect URIs (otherwise sign-in sends the browser to
+      # localhost). Set it to https://<this service>.onrender.com.
+      - key: API_PUBLIC_URL
+        sync: false
+
+      # The Vercel origin, for CORS. Exactly one, no wildcard.
+      - key: FRONTEND_ORIGIN
+        sync: false
+
+      # --- data ----------------------------------------------------------
+      # Neon, with pgvector enabled and both migration sets applied. Use the
+      # pooled connection string and keep sslmode=require.
+      - key: DATABASE_URL
+        sync: false
+
+      # --- model ---------------------------------------------------------
+      - key: OPENAI_API_KEY
+        sync: false
+
+      # --- sources (all required: the agent refuses to start without them,
+      # because a server missing one answers multi-hop questions badly
+      # rather than not at all) --------------------------------------------
+      - key: JIRA_BASE_URL
+        sync: false
+      - key: JIRA_EMAIL
+        sync: false
+      - key: JIRA_API_TOKEN
+        sync: false
+      - key: JIRA_PROJECTS
+        sync: false
+      - key: NOTION_TOKEN
+        sync: false
+      # Pins every Gmail search to the demo slice of a real mailbox. Required
+      # deliberately: an empty scope is a safety hole, not a wider default.
+      - key: GMAIL_QUERY_SCOPE
+        sync: false
+
+      # --- auth ----------------------------------------------------------
+      # The Web OAuth client, which must list this service's two callback URLs
+      # under Authorized redirect URIs. See docs/deploy.md.
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: AUTH_ALLOWED_EMAILS
+        sync: false
+      - key: AUTH_API_TOKEN
+        generateValue: true
+      - key: LLM_KEY_ENCRYPTION_SECRET
+        sync: false
+      - key: DEV_USER_EMAIL
+        sync: false
+
+      # --- the Gmail demo credential -------------------------------------
+      # These two point at Render Secret Files, which are mounted read-only
+      # under /etc/secrets. The token cannot be obtained by the process — the
+      # OAuth flow needs a human at a browser — so it is produced locally with
+      # `make gmail-auth` and uploaded. A refreshed token cannot be written
+      # back to a read-only mount; that is handled, and logged as a warning
+      # rather than failing the request.
+      - key: GMAIL_CREDENTIALS_JSON
+        value: /etc/secrets/gmail-credentials.json
+      - key: GMAIL_TOKEN_PATH
+        value: /etc/secrets/.gmail-token.json
+
+      # --- write actions -------------------------------------------------
+      # Left at their defaults if unset. GMAIL_SEND_ALLOWED_DOMAINS is worth
+      # setting on a public deployment: empty means any recipient domain.
+      - key: GMAIL_SEND_ALLOWED_DOMAINS
+        sync: false

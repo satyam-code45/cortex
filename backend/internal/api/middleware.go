@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
@@ -27,7 +28,20 @@ var allowedHostnames = map[string]struct{}{
 }
 
 // hostCheck rejects requests whose Host header is not one this server answers to.
-func hostCheck(logger *slog.Logger) func(http.Handler) http.Handler {
+//
+// extra is the deployment's own public hostname, empty for local development.
+// A hosted deployment needs it or the check rejects every request including its
+// own health check, which reads as "the service never started" — but it is
+// passed in rather than wildcarded, because the whole value of this check is
+// that the set of acceptable names is closed and known.
+func hostCheck(logger *slog.Logger, extra string) func(http.Handler) http.Handler {
+	allowed := make(map[string]struct{}, len(allowedHostnames)+1)
+	for name := range allowedHostnames {
+		allowed[name] = struct{}{}
+	}
+	if extra = strings.TrimSpace(extra); extra != "" {
+		allowed[strings.ToLower(extra)] = struct{}{}
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			host := r.Host
@@ -35,7 +49,7 @@ func hostCheck(logger *slog.Logger) func(http.Handler) http.Handler {
 			if name, _, err := net.SplitHostPort(host); err == nil {
 				host = name
 			}
-			if _, ok := allowedHostnames[host]; !ok {
+			if _, ok := allowed[strings.ToLower(host)]; !ok {
 				logger.Warn("rejected request with unexpected Host header",
 					"host", r.Host, "path", r.URL.Path)
 				writeError(w, logger, http.StatusMisdirectedRequest,
