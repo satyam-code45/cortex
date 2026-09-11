@@ -130,6 +130,28 @@ type Deps struct {
 	// cortex-api.onrender.com. Empty for local development, where the
 	// loopback names are the only ones that should ever be answered to.
 	PublicHostname string
+	// CookieSecure marks the auth cookies Secure regardless of whether this
+	// process itself terminated TLS.
+	//
+	// It has to be told, not inferred: behind a platform proxy TLS ends at the
+	// edge and the request arrives as plain HTTP, so r.TLS is nil even though
+	// the browser is on https. Inferring from r.TLS alone produces a
+	// non-Secure cookie on a public site, which is both wrong and fatal to
+	// CookieCrossSite below.
+	CookieSecure bool
+	// CookieCrossSite sends the auth cookies with SameSite=None instead of Lax.
+	//
+	// Needed when the frontend and the API are on different sites — a frontend
+	// on vercel.app calling an API on onrender.com. A Lax cookie is never sent
+	// on such a request, so the session simply does not arrive and every
+	// authenticated call answers 401, which reads as a broken login rather
+	// than as a cookie policy.
+	//
+	// The CSRF protection Lax was providing is carried by two other things
+	// that remain in force: CORS grants exactly one origin, so another site
+	// cannot read any response, and every mutating endpoint requires a JSON
+	// content type, which forces a preflight that a disallowed origin fails.
+	CookieCrossSite bool
 	// GmailBaseURL overrides the Gmail API root for the connect flow's
 	// mailbox validation; tests point it at an httptest server.
 	GmailBaseURL string

@@ -52,14 +52,15 @@ func (s *Server) handleGoogleLogin(w http.ResponseWriter, r *http.Request) {
 	// callback and none is a secret once the flow completes. HttpOnly keeps
 	// scripts on any origin from reading them; Lax still sends the cookie on
 	// Google's top-level redirect back.
+	secure, sameSite := s.cookieAttrs(r)
 	http.SetCookie(w, &http.Cookie{
 		Name:     auth.StateCookieName,
 		Value:    state + "." + pkce.Verifier + "." + nonce,
 		Path:     "/api/auth",
 		MaxAge:   int(stateTTL.Seconds()),
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
-		SameSite: http.SameSiteLaxMode,
+		Secure:   secure,
+		SameSite: sameSite,
 	})
 	http.Redirect(w, r, s.deps.OIDC.LoginURL(state, pkce, nonce), http.StatusFound)
 }
@@ -76,7 +77,7 @@ func (s *Server) handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, logger, http.StatusBadRequest, "login state missing or expired — start again at /api/auth/google/login")
 		return
 	}
-	clearCookie(w, r, auth.StateCookieName, "/api/auth")
+	s.clearCookie(w, r, auth.StateCookieName, "/api/auth")
 
 	parts := strings.Split(cookie.Value, ".")
 	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
@@ -161,14 +162,15 @@ func (s *Server) handleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 		logger.Warn("auth: sweep expired sessions", "error", err)
 	}
 
+	secure, sameSite := s.cookieAttrs(r)
 	http.SetCookie(w, &http.Cookie{
 		Name:     auth.SessionCookieName,
 		Value:    sessionToken,
 		Path:     "/",
 		MaxAge:   int(sessionTTL.Seconds()),
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
-		SameSite: http.SameSiteLaxMode,
+		Secure:   secure,
+		SameSite: sameSite,
 	})
 	http.Redirect(w, r, s.deps.FrontendOrigin+"/", http.StatusFound)
 }
@@ -182,7 +184,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	clearCookie(w, r, auth.SessionCookieName, "/")
+	s.clearCookie(w, r, auth.SessionCookieName, "/")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -219,15 +221,31 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.deps.Logger, http.StatusOK, resp)
 }
 
+// cookieAttrs returns the Secure and SameSite attributes every auth cookie in
+// this deployment must carry.
+//
+// One place, because the four cookies this server sets have to agree: a cookie
+// cleared with different attributes than it was set with is not cleared at all,
+// and browsers reject SameSite=None unless Secure is also set — so deciding
+// them together is what keeps that pair valid.
+func (s *Server) cookieAttrs(r *http.Request) (bool, http.SameSite) {
+	secure := r.TLS != nil || s.deps.CookieSecure
+	if s.deps.CookieCrossSite {
+		return secure, http.SameSiteNoneMode
+	}
+	return secure, http.SameSiteLaxMode
+}
+
 // clearCookie expires a cookie with the attributes it was set with.
-func clearCookie(w http.ResponseWriter, r *http.Request, name, path string) {
+func (s *Server) clearCookie(w http.ResponseWriter, r *http.Request, name, path string) {
+	secure, sameSite := s.cookieAttrs(r)
 	http.SetCookie(w, &http.Cookie{
 		Name:     name,
 		Value:    "",
 		Path:     path,
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
-		SameSite: http.SameSiteLaxMode,
+		Secure:   secure,
+		SameSite: sameSite,
 	})
 }

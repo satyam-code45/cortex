@@ -71,6 +71,42 @@ func publicHostname(cfg *config.Config) string {
 	return parsed.Hostname()
 }
 
+// cookieSecure reports whether the auth cookies must be marked Secure.
+//
+// Not inferable from the request: behind a platform proxy TLS terminates at the
+// edge and the request reaches this process as plain HTTP, so r.TLS is nil on a
+// site the browser loaded over https. The configured public URL is what says
+// how the browser actually reached us.
+func cookieSecure(cfg *config.Config) bool {
+	return strings.HasPrefix(cfg.APIPublicURL, "https://")
+}
+
+// cookieCrossSite reports whether the frontend is on a different host than the
+// API, which is what forces SameSite=None on the auth cookies.
+//
+// Compared by host rather than by registrable domain, which errs toward None:
+// api.example.com and app.example.com are technically one site and would work
+// with Lax, but treating them as cross-site only costs the Lax CSRF hint, which
+// the single-origin CORS grant and the JSON content-type requirement already
+// cover. Getting it wrong the other way costs a login that always answers 401.
+//
+// Empty APIPublicURL means a local run, where the frontend and API are both on
+// localhost and genuinely same-site.
+func cookieCrossSite(cfg *config.Config) bool {
+	if cfg.APIPublicURL == "" {
+		return false
+	}
+	api, err := url.Parse(cfg.APIPublicURL)
+	if err != nil {
+		return false
+	}
+	frontend, err := url.Parse(cfg.FrontendOrigin)
+	if err != nil {
+		return false
+	}
+	return !strings.EqualFold(api.Hostname(), frontend.Hostname())
+}
+
 func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
@@ -211,6 +247,8 @@ func run(logger *slog.Logger) error {
 		Connections:          deps.Connections,
 		ConnectRedirectURI:   apiOrigin(cfg) + "/api/connections/gmail/callback",
 		PublicHostname:       publicHostname(cfg),
+		CookieSecure:         cookieSecure(cfg),
+		CookieCrossSite:      cookieCrossSite(cfg),
 		APIToken:             cfg.AuthAPIToken,
 		BearerEmail:          cfg.DevUserEmail,
 		AllowedEmails:        lowered(cfg.AuthAllowedEmails),

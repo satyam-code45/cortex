@@ -74,14 +74,15 @@ func (s *Server) handleGmailConnect(w http.ResponseWriter, r *http.Request) {
 		scopes = []string{gmail.ScopeReadonly, gmail.ScopeSend}
 	}
 
+	secure, sameSite := s.cookieAttrs(r)
 	http.SetCookie(w, &http.Cookie{
 		Name:     auth.ConnectStateCookieName,
 		Value:    state + "." + pkce.Verifier + "." + intent,
 		Path:     connectStateCookiePath,
 		MaxAge:   int(stateTTL.Seconds()),
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
-		SameSite: http.SameSiteLaxMode,
+		Secure:   secure,
+		SameSite: sameSite,
 	})
 
 	authURL := s.deps.OIDC.Client.AuthCodeURL(auth.AuthCodeParams{
@@ -114,7 +115,7 @@ func (s *Server) handleGmailCallback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, logger, http.StatusBadRequest, "connect state missing or expired — start again from the Connections page")
 		return
 	}
-	clearCookie(w, r, auth.ConnectStateCookieName, connectStateCookiePath)
+	s.clearCookie(w, r, auth.ConnectStateCookieName, connectStateCookiePath)
 
 	parts := strings.Split(cookie.Value, ".")
 	if len(parts) < 2 || len(parts) > 3 || parts[0] == "" || parts[1] == "" {

@@ -171,3 +171,72 @@ func TestUnexpectedHostReachesNoHandler(t *testing.T) {
 		t.Errorf("database transactions started = %d, want 0", db.begins)
 	}
 }
+
+// The auth cookies have to be sendable from wherever the frontend actually is.
+//
+// This is the bug a split deployment finds and a local run cannot: with the
+// frontend on one site and the API on another, a SameSite=Lax cookie is never
+// sent on the frontend's fetch calls, so the session never arrives and every
+// authenticated endpoint answers 401 — which looks exactly like a broken login.
+// SameSite=None fixes it, and browsers only honour None when Secure is set too,
+// so the two attributes are asserted together.
+func TestAuthCookieIsSendableFromTheConfiguredFrontend(t *testing.T) {
+	tests := []struct {
+		name         string
+		crossSite    bool
+		secure       bool
+		wantSameSite string
+		wantSecure   bool
+	}{
+		{
+			name:         "split deployment",
+			crossSite:    true,
+			secure:       true,
+			wantSameSite: "None",
+			wantSecure:   true,
+		},
+		{
+			name:         "local run, one site",
+			crossSite:    false,
+			secure:       false,
+			wantSameSite: "Lax",
+			wantSecure:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := api.NewRouter(withTestAuth(api.Deps{
+				DB:              &stubDB{},
+				Enqueuer:        &stubEnqueuer{},
+				Model:           testModel,
+				Logger:          discardLogger(),
+				CookieSecure:    tt.secure,
+				CookieCrossSite: tt.crossSite,
+			}))
+
+			// The login redirect is the first cookie the flow sets, and it
+			// needs the same attributes as the session cookie that follows.
+			req := localRequest(http.MethodGet, "/api/auth/google/login", nil)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+
+			cookies := rec.Result().Cookies()
+			if len(cookies) == 0 {
+				t.Fatalf("no cookie set (status %d, body %q)", rec.Code, rec.Body.String())
+			}
+			raw := rec.Header().Get("Set-Cookie")
+			if !strings.Contains(raw, "SameSite="+tt.wantSameSite) {
+				t.Errorf("Set-Cookie = %q, want it to carry SameSite=%s", raw, tt.wantSameSite)
+			}
+			if cookies[0].Secure != tt.wantSecure {
+				t.Errorf("Secure = %v, want %v (raw %q)", cookies[0].Secure, tt.wantSecure, raw)
+			}
+			// None without Secure is rejected outright by browsers, which
+			// would be a silently broken login rather than a visible error.
+			if strings.Contains(raw, "SameSite=None") && !cookies[0].Secure {
+				t.Error("SameSite=None without Secure: browsers will discard this cookie")
+			}
+		})
+	}
+}
