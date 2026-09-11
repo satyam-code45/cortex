@@ -17,6 +17,7 @@ import {
   deleteConnection,
   getConnections,
   gmailConnectUrl,
+  putConnectionWrites,
   putConnectionsMode,
   putJiraConnection,
   putNotionConnection,
@@ -34,6 +35,8 @@ const callbackErrors: Record<string, string> = {
   gmail_validation_failed:
     "Connected to Google, but the mailbox could not be read. Try again.",
   access_denied: "Google access was declined — nothing was connected.",
+  gmail_send_not_granted:
+    "Gmail is connected for reading, but permission to send was not granted — so sending stays off. Try again and allow the “send email on your behalf” permission.",
 };
 
 // CallbackBanner renders the ?connected= / ?error= result of the Gmail flow.
@@ -44,6 +47,14 @@ function CallbackBanner({ gmailConnected }: { gmailConnected: boolean }) {
   const params = useSearchParams();
   const connected = params.get("connected");
   const error = params.get("error");
+  if (params.get("writes_enabled") === "gmail" && gmailConnected) {
+    return (
+      <p className="rounded-md bg-muted px-3 py-2 text-sm">
+        Cortex can now propose emails from this mailbox. Every one waits for your
+        approval before it is sent.
+      </p>
+    );
+  }
   if (connected === "gmail" && gmailConnected) {
     return (
       <p className="rounded-md bg-muted px-3 py-2 text-sm">
@@ -76,45 +87,98 @@ function identityLine(identity?: Record<string, string>): string {
     .join(" · ");
 }
 
-// ConnectedRow shows a connected (or errored) source's identity plus the
-// disconnect control.
+// writeConsequence says, in plain words, what enabling writes lets Cortex do as
+// this account.
+//
+// Deliberately concrete and per-source, because the consequence differs and the
+// user is the one who bears it. A generic "allow write access" tells nobody that
+// their Jira account is what will appear as the author of a new ticket.
+const writeConsequence: Record<SourceName, string> = {
+  jira: "Cortex will be able to create issues, change fields, comment, and move issues through the workflow — all as this Jira account, so your name appears as the author.",
+  notion:
+    "Cortex will be able to add content to pages shared with the integration, and create new pages under them. It never edits or removes existing content.",
+  gmail:
+    "Cortex will be able to send email from this mailbox. Recipients see it as coming from you.",
+};
+
+// ConnectedRow shows a connected (or errored) source's identity, the writes
+// switch, and the disconnect control.
 function ConnectedRow({
   source,
   status,
   onDisconnect,
+  onSetWrites,
+  writesError,
 }: {
   source: SourceName;
   status: ConnectionSourceStatus;
   onDisconnect: (source: SourceName) => void;
+  onSetWrites: (source: SourceName, enabled: boolean) => void;
+  writesError?: string;
 }) {
   return (
-    <div className="flex items-center justify-between gap-2 rounded-md border px-3 py-2">
-      <div className="min-w-0">
-        <p className="truncate text-sm">
-          {status.status === "error" ? (
-            <span className="font-medium text-destructive">
-              Needs reconnecting
+    <div className="space-y-2 rounded-md border px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate text-sm">
+            {status.status === "error" ? (
+              <span className="font-medium text-destructive">
+                Needs reconnecting
+              </span>
+            ) : (
+              <span className="font-medium">Connected</span>
+            )}{" "}
+            <span className="text-muted-foreground">
+              {identityLine(status.identity)}
             </span>
-          ) : (
-            <span className="font-medium">Connected</span>
-          )}{" "}
-          <span className="text-muted-foreground">
-            {identityLine(status.identity)}
-          </span>
-        </p>
-        {status.status === "error" && status.last_error && (
-          <p className="truncate text-sm text-muted-foreground">
-            {status.last_error}
           </p>
-        )}
+          {status.status === "error" && status.last_error && (
+            <p className="truncate text-sm text-muted-foreground">
+              {status.last_error}
+            </p>
+          )}
+        </div>
+        <Button
+          variant="destructive"
+          size="sm"
+          onClick={() => onDisconnect(source)}
+        >
+          Disconnect
+        </Button>
       </div>
-      <Button
-        variant="destructive"
-        size="sm"
-        onClick={() => onDisconnect(source)}
-      >
-        Disconnect
-      </Button>
+
+      {/* The writes switch is offered only on a working connection: turning it
+          on runs a live permission check, which cannot pass against a credential
+          that has already stopped working. */}
+      {status.status === "connected" && (
+        <div className="border-t pt-2">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">
+                {status.writes_enabled
+                  ? "Cortex can propose changes"
+                  : "Read-only"}
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {status.writes_enabled
+                  ? "Every change still waits for your approval before it happens — nothing is ever carried out on its own."
+                  : writeConsequence[source]}
+              </p>
+            </div>
+            <Button
+              variant={status.writes_enabled ? "outline" : "secondary"}
+              size="sm"
+              className="shrink-0"
+              onClick={() => onSetWrites(source, !status.writes_enabled)}
+            >
+              {status.writes_enabled ? "Turn off" : "Allow changes"}
+            </Button>
+          </div>
+          {writesError && (
+            <p className="mt-1 text-xs text-destructive">{writesError}</p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -220,6 +284,40 @@ export default function ConnectionsPage() {
     [load],
   );
 
+  // Per-source writes errors, keyed by source: a refused Jira toggle must not
+  // print its message under the Gmail card.
+  const [writesErrors, setWritesErrors] = useState<
+    Partial<Record<SourceName, string>>
+  >({});
+
+  const setWrites = useCallback(
+    async (source: SourceName, enabled: boolean) => {
+      setWritesErrors((prev) => ({ ...prev, [source]: undefined }));
+
+      // Gmail sending needs a scope only a fresh consent screen can grant, so
+      // enabling it is a navigation to Google rather than a background request.
+      // A person should see the permission named by Google before Cortex can
+      // send mail as them.
+      if (source === "gmail" && enabled) {
+        window.location.assign(gmailConnectUrl(true));
+        return;
+      }
+      try {
+        const next = await putConnectionWrites(source, enabled);
+        setInfo(next);
+      } catch (err) {
+        setWritesErrors((prev) => ({
+          ...prev,
+          [source]:
+            err instanceof ApiRequestError
+              ? err.message
+              : `failed to change write access for ${source}`,
+        }));
+      }
+    },
+    [],
+  );
+
   const setUseDemo = useCallback(async (useDemo: boolean) => {
     setModeError(null);
     try {
@@ -314,6 +412,8 @@ export default function ConnectionsPage() {
                     source="jira"
                     status={jira}
                     onDisconnect={disconnect}
+                    onSetWrites={setWrites}
+                    writesError={writesErrors.jira}
                   />
                 )}
                 <form
@@ -389,6 +489,8 @@ export default function ConnectionsPage() {
                     source="notion"
                     status={notion}
                     onDisconnect={disconnect}
+                    onSetWrites={setWrites}
+                    writesError={writesErrors.notion}
                   />
                 )}
                 <form
@@ -442,6 +544,8 @@ export default function ConnectionsPage() {
                     source="gmail"
                     status={gmail}
                     onDisconnect={disconnect}
+                    onSetWrites={setWrites}
+                    writesError={writesErrors.gmail}
                   />
                 )}
                 <div>

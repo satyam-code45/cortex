@@ -29,6 +29,10 @@ type sourceStatus struct {
 	Identity  json.RawMessage `json:"identity,omitempty"`
 	UpdatedAt *time.Time      `json:"updated_at,omitempty"`
 	LastError string          `json:"last_error,omitempty"`
+	// WritesEnabled reports whether this connection may propose writes. Always
+	// false for an absent source, and false by default for a present one: a read
+	// connection never becomes a write connection without somebody asking.
+	WritesEnabled bool `json:"writes_enabled"`
 }
 
 // connectionsResponse is the GET /api/connections body.
@@ -88,10 +92,11 @@ func (s *Server) handleGetConnections(w http.ResponseWriter, r *http.Request) {
 		}
 		updatedAt := info.UpdatedAt
 		resp.Sources[info.Source] = sourceStatus{
-			Status:    status,
-			Identity:  info.Identity,
-			UpdatedAt: &updatedAt,
-			LastError: info.LastError,
+			Status:        status,
+			Identity:      info.Identity,
+			UpdatedAt:     &updatedAt,
+			LastError:     info.LastError,
+			WritesEnabled: info.WritesEnabled,
 		}
 	}
 	writeJSON(w, s.deps.Logger, http.StatusOK, resp)

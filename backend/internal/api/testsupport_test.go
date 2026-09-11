@@ -45,6 +45,13 @@ type stubEnqueuer struct {
 	runIDs  []uuid.UUID
 	indexed []string
 
+	// writes records the actions queued for execution, and resumed the runs
+	// queued to continue. The approval tests assert on these: that approving
+	// queues exactly one write, and that rejecting the last outstanding action
+	// queues exactly one resume.
+	writes  []uuid.UUID
+	resumed []uuid.UUID
+
 	// lastIndexFinishedAt configures NewestFinalizedIndexJob; the zero value
 	// means no index job has ever finished (no cooldown).
 	lastIndexFinishedAt time.Time
@@ -57,6 +64,39 @@ func (s *stubEnqueuer) EnqueueAgentRun(_ context.Context, _ pgx.Tx, runID uuid.U
 	defer s.mu.Unlock()
 	s.runIDs = append(s.runIDs, runID)
 	return s.err
+}
+
+// EnqueueExecuteWrite records a queued write execution. It shares err with the
+// other enqueues: the failure path under test is "the queue is down", and for an
+// approval that has to take the whole transaction with it — an approval that
+// commits without a job would be a decision nothing ever acts on.
+func (s *stubEnqueuer) EnqueueExecuteWrite(_ context.Context, _ pgx.Tx, actionID uuid.UUID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.writes = append(s.writes, actionID)
+	return s.err
+}
+
+// EnqueueResumeRun records a queued run continuation.
+func (s *stubEnqueuer) EnqueueResumeRun(_ context.Context, _ pgx.Tx, runID uuid.UUID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.resumed = append(s.resumed, runID)
+	return s.err
+}
+
+// queuedWrites returns the actions queued for execution.
+func (s *stubEnqueuer) queuedWrites() []uuid.UUID {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]uuid.UUID(nil), s.writes...)
+}
+
+// queuedResumes returns the runs queued to continue.
+func (s *stubEnqueuer) queuedResumes() []uuid.UUID {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]uuid.UUID(nil), s.resumed...)
 }
 
 // EnqueueIndexSource records a queued reindex. It shares err with
@@ -189,6 +229,40 @@ func anonymousRequest(method, target string, body io.Reader) *http.Request {
 	req := localRequest(method, target, body)
 	req.Header.Del("Authorization")
 	return req
+}
+
+// humanRequest builds a request authenticated as a signed-in person rather than
+// with the operator token.
+//
+// The endpoints that decide a write — approve, reject, and the per-source writes
+// toggle — refuse the static bearer token deliberately: the guarantee they carry
+// is that a PERSON read the payload and approved it, and a shared machine
+// credential that lives in scripts, shell history and CI config is not a person.
+// Tests about those handlers therefore have to arrive the way a browser does.
+//
+// The session is created for devUserEmail, the same email the action fixtures
+// seed their owner with, so the caller is also the owner of what it decides.
+func humanRequest(t *testing.T, pool *pgxpool.Pool, method, target string, body io.Reader) *http.Request {
+	t.Helper()
+	req := anonymousRequest(method, target, body)
+	cookie, _ := createSessionForEmail(t, pool, devUserEmail)
+	req.AddCookie(cookie)
+	return req
+}
+
+// putJSONAsHuman is putJSON for an endpoint that refuses the operator token.
+func putJSONAsHuman(
+	t *testing.T,
+	pool *pgxpool.Pool,
+	h http.Handler,
+	target, body string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	req := humanRequest(t, pool, http.MethodPut, target, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
 }
 
 // withTestAuth fills the auth-related Deps every test router needs: bearer

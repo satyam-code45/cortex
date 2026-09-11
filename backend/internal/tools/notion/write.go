@@ -2,6 +2,7 @@ package notion
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -10,7 +11,12 @@ import (
 	"cortex/internal/tools/httpx"
 )
 
-// Page authoring, used only by the seeder.
+// Page authoring.
+//
+// Two callers: the seeder, which writes the demo fixtures, and the execution job
+// that performs a page write a human approved. Nothing a model can invoke
+// reaches this file directly — the agent's write tools propose, and a person
+// decides.
 //
 // This is the inverse of blocks.go, and it lives in the same package on purpose:
 // the fixtures are written as markdown, uploaded as Notion blocks, and read back
@@ -487,4 +493,57 @@ func chunkRunes(text string, size int) []string {
 		out = append(out, string(runes[start:min(start+size, len(runes))]))
 	}
 	return out
+}
+
+// AppendToPage appends markdown to the end of an existing page and reports how
+// many blocks it added.
+//
+// The exported counterpart to appendBlocks, and the difference is what it does
+// with markdown rather than with blocks: an approved payload is markdown a human
+// read, so the conversion happens here where a caller cannot pass blocks that
+// nobody saw.
+//
+// Append rather than replace, deliberately. ReplacePageContent next door exists
+// for the seeder, which must converge on a fixture; a write proposed by the agent
+// must never destroy text somebody else wrote, so there is no
+// replace-a-page capability on the agent path at all.
+func (c *Client) AppendToPage(ctx context.Context, pageID, markdown string) (int, error) {
+	id, err := normalizeID(pageID)
+	if err != nil {
+		return 0, err
+	}
+	blocks := markdownToBlocks(markdown)
+	if len(blocks) == 0 {
+		return 0, fmt.Errorf("notion: nothing to append to %s — the markdown is empty", id)
+	}
+	if err := c.appendBlocks(ctx, id, blocks); err != nil {
+		return 0, WriteCapabilityError(err)
+	}
+	return len(blocks), nil
+}
+
+// WriteCapabilityError rewrites Notion's permission refusal into an instruction.
+//
+// Notion has no endpoint that reports what an integration is allowed to do:
+// /v1/users/me returns its name and workspace and nothing about its
+// capabilities. So a missing "Insert content" capability cannot be caught when a
+// user enables writes — it can only surface here, on the first real attempt, and
+// what Notion says at that point is "restricted_resource", which tells nobody
+// what to go and change.
+//
+// The remedy is a checkbox in Notion's own integration settings, so the error
+// says that. It reaches a human through the action row and the audit view,
+// behind the approval gate, which is the one place this failure mode is
+// harmless.
+func WriteCapabilityError(err error) error {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return err
+	}
+	if apiErr.StatusCode != http.StatusForbidden && apiErr.Code != "restricted_resource" {
+		return err
+	}
+	return fmt.Errorf("notion refused the write: the integration lacks the \"Insert content\" / "+
+		"\"Update content\" capability. Grant it in Notion under Settings → Connections → your "+
+		"integration → Capabilities, then try again: %w", err)
 }

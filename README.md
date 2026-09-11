@@ -6,6 +6,8 @@ Cortex connects to live enterprise sources — Jira, Notion, Gmail — and answe
 
 Every run is fully traceable. Each investigation is an agent loop whose every step — LLM call, tool call, retrieved document, reasoning summary — is persisted as an event stream and replayed live into the UI's trace panel, so you can watch the agent pivot from Jira to Notion to Gmail as it happens, then audit the finished run event by event. Answers cite their evidence; claims the sources don't support are refused rather than invented.
 
+Cortex can also **act** — send email, file and update Jira issues, add to Notion pages — but never on its own. The agent *proposes* a write with the exact payload it would send, the run pauses mid-loop, and a human approves, edits, or declines it before anything happens. There is no auto-approve setting: everything the agent reads is attacker-controlled text, so a person in the loop is what stops a Jira comment becoming a way to send mail from your address.
+
 ## Architecture
 
 ```mermaid
@@ -58,7 +60,7 @@ Deliberately excluded, and why:
 
 ## What you need first
 
-The quickstart takes about 15 minutes **once you have these in hand** (allow an evening if you're creating them from scratch):
+The quickstart takes about 15 minutes **once you have these in hand** (allow an evening if you're creating them from scratch). **[`docs/setup.md`](docs/setup.md) is the click-by-click guide to obtaining every credential below**, including what goes wrong and why:
 
 - **Docker + Docker Compose**, **Go 1.23+**, **Node 20+**, `make`
 - **OpenAI API key** — the server uses it for embeddings/indexing; each signed-in user additionally adds their own key in the UI for chat (bring-your-own-key)
@@ -68,6 +70,8 @@ The quickstart takes about 15 minutes **once you have these in hand** (allow an 
   - a **Desktop** client — used once by `make gmail-auth` to seed and read the demo mailbox (scopes: `gmail.readonly`, `gmail.insert`, `gmail.labels`)
   - a **Web application** client — user sign-in, with redirect URIs `http://localhost:8080/api/auth/google/callback` and `http://localhost:8080/api/connections/gmail/callback`
 - A Gmail account you're comfortable seeding ~16 fixture emails into (they're labeled, backdated, and stay in your mailbox)
+
+Write actions need one extra scope (`gmail.send`) and are off until you enable them per source — see [Write actions](#write-actions).
 
 ## Quickstart
 
@@ -102,6 +106,41 @@ Three questions of increasing difficulty against the seeded corpus (a fictional 
 
 The full demo script with expected behavior notes is in [`docs/demo.md`](docs/demo.md).
 
+## Write actions
+
+Cortex ships seven write tools — `gmail_send_email`, `jira_create_issue`, `jira_update_issue`,
+`jira_add_comment`, `jira_transition_issue`, `notion_append_to_page`, `notion_create_page` — and
+none of them writes anything. Each one validates its request against the live system, records the
+exact payload it *would* send, and stops the run. A person then reads the request in full and
+approves, edits, or declines it with a reason; only then does a separate job perform it.
+
+Four properties make that more than a confirmation dialog:
+
+- **Approval is mandatory and unconfigurable.** No auto-approve flag, no trusted-user bypass, no
+  confidence threshold. The threat is concrete: anyone who can file a ticket or email the mailbox
+  can put instructions in the agent's transcript, and the moment a write can execute unattended
+  that becomes a way to send mail from the account owner's address.
+- **The payload a human sees is the payload that executes.** Recipients, thread, issue type and
+  transition are all resolved *before* the pause, so nothing is left to be decided after approval.
+  Edit the wording and the edited version is what goes out — both versions are kept.
+- **Writes execute exactly once.** The approval enqueues a distinct job; the agent loop never
+  performs the side effect. Each action row carries a derived idempotency key and a one-way status
+  lifecycle, and execution is a compare-and-set on that row *before* the upstream call — so a
+  retried job finds the row already claimed and sends nothing.
+- **Writes are opt-in per source, per user, and never available on the demo workspace.** A user
+  who has not enabled writes has no write tool in their registry at all, so the model cannot name
+  one. The demo workspace is somebody's real Jira and real mailbox; a signed-in stranger cannot
+  propose against it, let alone execute.
+
+Waiting costs nothing: a paused run holds no worker and no connection — its whole state is
+Postgres rows, and a decision enqueues a resume that rebuilds the agent's transcript from the run
+event log and continues from the iteration it stopped at. Undecided proposals expire after
+`ACTION_TTL` and the run is resumed and told so, rather than waiting forever.
+
+The **Actions** page is the audit trail: every proposal, the decision, who made it and when,
+whether the payload was edited, and what the upstream system returned. Read-only by design — an
+executed write cannot be undone, so the record is the recourse.
+
 ## Trace panel
 
 ![Live agent trace panel](docs/trace-panel.png)
@@ -129,16 +168,16 @@ Honest caveats: the suite was tuned against these cases, and the final numbers a
 
 **Why no agent framework?** The orchestrator loop — decide, call a tool, observe, compact context when it grows, stop when the answer is supported — is a few hundred lines of straight-line Go. Owning it means owning the failure surface: deduplication of repeated tool calls, honest failure when every source is down, token budgets, and a complete event log. Frameworks hide exactly the parts that need to be visible here.
 
-**How would human-in-the-loop work?** The run event log is complete enough to reconstruct the agent's transcript at any point. So HITL is a queue feature: pause a run into an `awaiting_approval` status with the pending action persisted, and on approval a resume job rebuilds the transcript from the events and continues. The same mechanism gates write-tools and mid-run clarifying questions.
+**How does human-in-the-loop work?** It is a queue feature, and it is what the run event log was built for: the log is complete enough to reconstruct the agent's transcript at any point, so pausing is just persisting. A proposed write moves the run to `awaiting_approval` with the pending action stored, the worker is released, and a decision enqueues a resume job that rebuilds the transcript from the events and continues from the iteration it stopped at — iterations, token totals and evidence all carried over, recovered from the log rather than from a second source of truth. `ReconstructTranscript` is production code, not a test helper, precisely because resuming a run and replaying one are the same operation. The same mechanism would gate mid-run clarifying questions.
 
 **How does it scale?** The API server and queue workers are stateless and scale horizontally as-is. The measured bottlenecks have cheap upgrade paths that don't change the architecture: SSE polling → Postgres LISTEN/NOTIFY, River → Kafka if job volume demands it, pgvector → dedicated vector store past ~10M vectors, trace events → OTel + columnar storage.
 
 ## Roadmap
 
-- **Guardrails** — prompt-injection checks on retrieved content, read-only tool enforcement as policy, output faithfulness check before answering
+- **Guardrails** — prompt-injection checks on retrieved content, output faithfulness check before answering
 - **CI eval gates** — run the eval suite against recorded baselines on every PR; fail on regression
 - **Persistent memory** — post-run extraction of durable facts, embedded and retrieved into future runs
-- **Human-in-the-loop** — pause/resume on the queue (see FAQ), write-tool approval gates, answer feedback feeding the eval set
+- **Answer feedback** — thumbs-up/down on answers feeding the eval set
 - **MCP** — reimplement the tool layer as MCP servers behind the same tool interface
 - **Multi-tenancy & hosted deploy** — org scoping, per-tenant rate limits, hosted Postgres (Neon) + Go binary + Vercel frontend
 
@@ -152,6 +191,8 @@ make seed-plan   # show what `make seed` would write, without writing
 ```
 
 SQL lives in `backend/db/queries` (sqlc) and `backend/db/migrations` (goose). Logging is stdlib `slog`. Tests are table-driven.
+
+Credential setup is documented in [`docs/setup.md`](docs/setup.md); the demo script with expected behaviour notes is in [`docs/demo.md`](docs/demo.md).
 
 ## License
 

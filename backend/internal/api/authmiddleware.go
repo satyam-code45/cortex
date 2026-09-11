@@ -74,6 +74,7 @@ func (s *Server) authenticateBearer(w http.ResponseWriter, r *http.Request, next
 		ID:      user.ID,
 		Email:   user.Email,
 		IsAdmin: true,
+		Machine: true,
 	})))
 }
 

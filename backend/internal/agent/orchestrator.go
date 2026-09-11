@@ -160,6 +160,14 @@ type Config struct {
 	MaxIterations       int
 	ToolTimeout         time.Duration
 	MaxToolContentChars int
+
+	// WritesPerUserPerHour caps how many writes one user can have executed or
+	// in flight per hour, enforced when a proposal is recorded rather than at
+	// execution. Refusing at proposal time is what makes the limit useful: the
+	// model is told it has hit the ceiling and can say so in its answer,
+	// whereas refusing after a human has approved something wastes their
+	// decision. Zero disables the limit.
+	WritesPerUserPerHour int
 	// ContextTokenBudget caps the estimated transcript size; the context
 	// guard compacts the oldest observations when a run approaches it.
 	ContextTokenBudget int
@@ -199,6 +207,8 @@ type Orchestrator struct {
 	maxToolContentChars int
 	contextTokenBudget  int
 
+	writesPerUserPerHour int
+
 	logger *slog.Logger
 	now    func() time.Time
 }
@@ -230,8 +240,11 @@ func New(cfg Config) (*Orchestrator, error) {
 		toolTimeout:         cfg.ToolTimeout,
 		maxToolContentChars: cfg.MaxToolContentChars,
 		contextTokenBudget:  cfg.ContextTokenBudget,
-		logger:              cfg.Logger,
-		now:                 cfg.Now,
+
+		writesPerUserPerHour: cfg.WritesPerUserPerHour,
+
+		logger: cfg.Logger,
+		now:    cfg.Now,
 	}
 	if o.utilityModel == "" {
 		o.utilityModel = cfg.Model
@@ -320,11 +333,41 @@ type runState struct {
 	// environment's, so they neither increment nor reset the streak.
 	consecutiveToolFailures int
 
+	// pending accumulates the writes proposed during the current iteration. A
+	// non-empty slice at the end of an iteration is what pauses the run: the
+	// loop stops, the worker is released, and nothing else happens on this run
+	// until every one of them has been decided.
+	//
+	// Collected per iteration rather than acted on per call because one
+	// iteration may legitimately propose several writes — "reply to this and
+	// file a ticket" is one request — and pausing after the first would hide
+	// the second from the person deciding.
+	pending []pausedAction
+
+	// reported records action ids whose decision has already been fed back into
+	// the transcript, recovered from the run's own resume events. It stops a
+	// second resume from telling the model twice about the same approval.
+	reported map[uuid.UUID]bool
+
+	// resumeInjection is the decision turn a resumed run opens with. Threaded
+	// through generate like every other injected turn, so it lands in that
+	// call's event payload and a later replay is exact.
+	resumeInjection []llm.Message
+
 	iterations   int
 	toolCalls    int
 	inputTokens  int
 	outputTokens int
 }
+
+// errPaused is returned by investigate when the loop stopped to wait for a
+// human, rather than because anything went wrong.
+//
+// A sentinel rather than a bool return because it has to travel out through the
+// same path as a real failure without being mistaken for one: pausing must not
+// mark the run failed, must not spend the run's error budget, and must return
+// the River job successfully so the worker is released.
+var errPaused = errors.New("agent: run paused for human approval")
 
 // cachedResult is a tool result already produced this run.
 type cachedResult struct {
@@ -340,6 +383,48 @@ type cachedResult struct {
 // database as 'failed' and returns nil, because retrying the River job would
 // not help and would spend money again.
 func (o *Orchestrator) Run(ctx context.Context, runID uuid.UUID) error {
+	env, found, err := o.resolveEnvironment(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return nil
+	}
+
+	state, ok, err := o.begin(ctx, runID, env.ownerID, env.registry, env.sources)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		// Already in a terminal state: a retried job, or a duplicate enqueue.
+		o.logger.Info("agent: run already finished, skipping", "run_id", runID)
+		return nil
+	}
+
+	return o.drive(ctx, state, env.noSourcesErr)
+}
+
+// runEnvironment is everything a run needs resolved before it is claimed: who
+// owns it, and which tools its owner's connections provide.
+type runEnvironment struct {
+	ownerID  uuid.UUID
+	registry *tools.Registry
+	sources  Sources
+	// noSourcesErr is set when the owner has connections but every one of them
+	// is broken. The run is still claimed and then failed honestly, so its trace
+	// records what was attempted.
+	noSourcesErr error
+}
+
+// resolveEnvironment resolves a run's owner and tool registry.
+//
+// Shared by a first execution and by a resume, and it has to be, because the
+// two must reach the same conclusion about the same run: a resumed run whose
+// registry was rebuilt differently would continue a conversation whose tool list
+// no longer matches the one recorded on run_started.
+//
+// found is false when the run row is gone.
+func (o *Orchestrator) resolveEnvironment(ctx context.Context, runID uuid.UUID) (runEnvironment, bool, error) {
 	// The owner is resolved before the claim: both per-run factories need it,
 	// and the registry in particular must exist before begin() — run_started
 	// is emitted inside the claim transaction and records the run's actual
@@ -361,10 +446,10 @@ func (o *Orchestrator) Run(ctx context.Context, runID uuid.UUID) error {
 		// never help, so skip the job like the claim guard does rather than
 		// burning River's whole attempt budget on it.
 		o.logger.Warn("agent: run no longer exists, skipping", "run_id", runID)
-		return nil
+		return runEnvironment{}, false, nil
 	}
 	if err != nil {
-		return fmt.Errorf("resolve owner for run %s: %w", runID, err)
+		return runEnvironment{}, false, fmt.Errorf("resolve owner for run %s: %w", runID, err)
 	}
 
 	// Resolve the run's tool registry from the owner's connections. A
@@ -374,25 +459,25 @@ func (o *Orchestrator) Run(ctx context.Context, runID uuid.UUID) error {
 	// user's real sources. Any other error is transient (a database blip, a
 	// provider hiccup during the eager credential check) and goes back to
 	// River for a retry.
-	registry, sources := o.registry, Sources{Mode: ModeDemo}
-	var noSourcesErr error
+	env := runEnvironment{ownerID: ownerID, registry: o.registry, sources: Sources{Mode: ModeDemo}}
 	if o.registryForUser != nil {
 		reg, src, err := o.registryForUser(ctx, ownerID)
 		if err != nil && !errors.Is(err, ErrNoUsableSources) {
-			return fmt.Errorf("resolve tool registry for run %s: %w", runID, err)
+			return runEnvironment{}, false, fmt.Errorf("resolve tool registry for run %s: %w", runID, err)
 		}
-		registry, sources, noSourcesErr = reg, src, err
+		env.registry, env.sources, env.noSourcesErr = reg, src, err
 	}
+	return env, true, nil
+}
 
-	state, ok, err := o.begin(ctx, runID, ownerID, registry, sources)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		// Already in a terminal state: a retried job, or a duplicate enqueue.
-		o.logger.Info("agent: run already finished, skipping", "run_id", runID)
-		return nil
-	}
+// drive runs a claimed run to a terminal state, or to a pause.
+//
+// Shared by a first execution and by a resume: everything from resolving the
+// provider onwards is identical, because a resumed run IS the same run — it has
+// a rebuilt transcript and a starting iteration, and nothing else about it
+// differs.
+func (o *Orchestrator) drive(ctx context.Context, state *runState, noSourcesErr error) error {
+	runID := state.runID
 
 	if noSourcesErr != nil {
 		o.logger.Error("agent: run has no usable sources", "run_id", runID, "error", noSourcesErr)
@@ -402,7 +487,7 @@ func (o *Orchestrator) Run(ctx context.Context, runID uuid.UUID) error {
 		return nil
 	}
 
-	// Resolve the run's provider after the claim. A permanent failure (no key,
+	// Resolve the provider after the claim. A permanent failure (no key,
 	// undecryptable key — marked ErrLLMKeyUnavailable) goes through the normal
 	// fail path: the run is marked failed with a safe reason and the job is
 	// NOT retried, because the condition does not heal and there is no money
@@ -429,6 +514,12 @@ func (o *Orchestrator) Run(ctx context.Context, runID uuid.UUID) error {
 	}
 
 	answer, forced, err := o.investigate(ctx, state)
+	if errors.Is(err, errPaused) {
+		// Not a failure: the loop stopped because it needs a person. Recording
+		// the pause and returning nil releases the worker, and a decision will
+		// enqueue a fresh job that rebuilds the loop from the event log.
+		return o.pause(ctx, state)
+	}
 	if err != nil {
 		reason := safeReason(err)
 		o.logger.Error("agent: run failed", "run_id", runID, "error", err)
@@ -535,7 +626,11 @@ func (o *Orchestrator) begin(ctx context.Context, runID, ownerID uuid.UUID, regi
 			recorded = append(recorded, eventMessage{Role: m.Role, Content: m.Content})
 		}
 
-		state.system = buildSystemPrompt(o.now().UTC().Format("2006-01-02"), state.registry.Names(), state.sources)
+		// canWrite is read off the registry rather than from configuration: the
+		// prompt must describe the tool list the model is actually being sent,
+		// and the registry is that list.
+		state.system = buildSystemPrompt(o.now().UTC().Format("2006-01-02"),
+			state.registry.Names(), state.sources, len(state.registry.WriteNames()) > 0)
 
 		return appendEvent(ctx, q, runID, EventRunStarted, runStartedPayload{
 			ConversationID: run.ConversationID,
@@ -567,9 +662,22 @@ func (o *Orchestrator) investigate(ctx context.Context, state *runState) (answer
 	// pending carries a turn to inject on the next generation. It is threaded
 	// through the loop rather than appended directly so that generate() stays the
 	// single place a turn enters both the transcript and the event log.
-	var pending []llm.Message
+	//
+	// A resumed run starts with the human's decisions sitting here, which is how
+	// they enter both the transcript and that call's event payload — so a later
+	// replay of the run rebuilds the conversation including the decision, rather
+	// than a conversation in which the model was never told.
+	pending := state.resumeInjection
+	state.resumeInjection = nil
+	// Tracked explicitly rather than inferred from len(pending): a resume and a
+	// completeness check both open with an injected turn, and telling them
+	// apart by that alone mislabels every resumed run.
+	resuming := len(pending) > 0
 
-	for iteration := 1; iteration <= o.maxIterations; iteration++ {
+	// A resumed run continues from where it stopped rather than from 1, and it
+	// keeps the same ceiling: the iterations already spent are spent, and waiting
+	// for a human costs none of them.
+	for iteration := state.iterations + 1; iteration <= o.maxIterations; iteration++ {
 		state.iterations = iteration
 
 		// The context guard runs before the generation that would pay for an
@@ -580,11 +688,15 @@ func (o *Orchestrator) investigate(ctx context.Context, state *runState) (answer
 		}
 
 		purpose := PurposeAgentLoop
-		if len(pending) > 0 {
+		switch {
+		case resuming:
+			purpose = PurposeResume
+		case len(pending) > 0:
 			purpose = PurposeCompletenessCheck
 		}
 		resp, err := o.generate(ctx, state, iteration, purpose, definitions, pending...)
 		pending = nil
+		resuming = false
 		if err != nil {
 			return "", false, err
 		}
@@ -658,6 +770,15 @@ func (o *Orchestrator) investigate(ctx context.Context, state *runState) (answer
 					state.consecutiveToolFailures)
 			}
 		}
+
+		// Every tool call of the iteration is recorded before the pause is
+		// considered, so a person deciding sees all of the writes this turn
+		// proposed rather than the first one. "Reply to her and file a ticket"
+		// is one request, and approving half of it in ignorance of the other
+		// half is not a decision anybody meant to make.
+		if len(state.pending) > 0 {
+			return "", false, errPaused
+		}
 	}
 
 	// The cap was reached (or the model stalled): ask for the best answer the
@@ -667,8 +788,18 @@ func (o *Orchestrator) investigate(ctx context.Context, state *runState) (answer
 	if err := o.compactIfNeeded(ctx, state, state.iterations); err != nil {
 		return "", false, err
 	}
-	resp, err := o.generate(ctx, state, state.iterations, PurposeFinalAnswer, nil,
-		llm.Message{Role: llm.RoleUser, Content: forcedAnswerInstruction})
+
+	// Any turn still queued goes in FIRST, ahead of the forced instruction.
+	//
+	// This matters for a resumed run that had already reached its iteration cap
+	// when it paused: the loop above never runs a body, so the human's decisions
+	// are still sitting in pending. Dropping them here would produce an answer
+	// written as though the writes were still awaiting approval — describing an
+	// email as pending after it had been sent, or omitting a rejection the
+	// person had explicitly given a reason for. The decisions are the state of
+	// the world; the instruction to answer comes after them.
+	closing := append(pending, llm.Message{Role: llm.RoleUser, Content: forcedAnswerInstruction})
+	resp, err := o.generate(ctx, state, state.iterations, PurposeFinalAnswer, nil, closing...)
 	if err != nil {
 		return "", false, err
 	}
@@ -850,7 +981,7 @@ func (o *Orchestrator) compactIfNeeded(ctx context.Context, state *runState, ite
 		// Re-fenced as untrusted: the summary is derived from third-party
 		// text. The marker line is ours and sits first inside the fence so
 		// the model knows this observation is lossy.
-		replacement := fence("tool_result", ` compacted="true"`,
+		replacement := fence("tool_result", ` compacted="true"`, "untrusted",
 			fmt.Sprintf("[compacted: summary of an earlier tool result, %d chars original]\n%s",
 				originalChars, summary))
 
@@ -1044,6 +1175,10 @@ func (o *Orchestrator) runTool(ctx context.Context, state *runState, iteration i
 	state.toolSuccesses++
 	state.consecutiveToolFailures = 0
 
+	if result.Proposal != nil {
+		return o.finishProposal(ctx, state, iteration, call, result, finish)
+	}
+
 	observation, outcome := o.fitToContext(ctx, state, iteration, result)
 	// Fence the result before it enters the transcript. Everything a tool returns
 	// is third-party text — a Jira description or comment that anyone with access
@@ -1184,7 +1319,24 @@ func evidenceKey(item tools.EvidenceItem) string {
 // content cannot terminate its own fence and impersonate the transcript around
 // it.
 func fenceUntrusted(toolName, content string) string {
-	return fence("tool_result", fmt.Sprintf(" tool=%q", toolName), content)
+	return fence("tool_result", fmt.Sprintf(" tool=%q", toolName), "untrusted", content)
+}
+
+// fenceSystem fences an observation Cortex generated itself.
+//
+// A write tool's observation is the one tool result that is NOT third-party
+// text: it is this system telling the model that a proposal was recorded, that
+// nothing has happened yet, and that the run is about to pause. Labelling that
+// "untrusted" alongside a vendor's email would be actively harmful — the model
+// is instructed to treat untrusted content as evidence never to be obeyed, and
+// the whole value of this particular observation is that the model DOES act on
+// it and stops.
+//
+// So it keeps the fence — the structure stays uniform, and a payload echoed
+// inside it still cannot close the block and impersonate the transcript — but
+// declares its provenance honestly.
+func fenceSystem(toolName, content string) string {
+	return fence("tool_result", fmt.Sprintf(" tool=%q", toolName), "cortex", content)
 }
 
 // fence wraps third-party content in a labelled, self-terminating block.
@@ -1196,11 +1348,11 @@ func fenceUntrusted(toolName, content string) string {
 // The match is deliberately loose \u2014 case-insensitive, whitespace tolerated
 // around the tag name \u2014 because models parse pseudo-XML loosely, so an exact
 // byte match would leave `</Tool_Result >` working as an escape.
-func fence(tag, attrs, content string) string {
+func fence(tag, attrs, trust, content string) string {
 	closing := "</" + tag + ">"
 	pattern := regexp.MustCompile(`(?i)</\s*` + regexp.QuoteMeta(tag) + `\s*>`)
 	safe := pattern.ReplaceAllString(content, "<\u2215"+tag+">")
-	return fmt.Sprintf("<%s%s trust=%q>\n", tag, attrs, "untrusted") + safe + "\n" + closing
+	return fmt.Sprintf("<%s%s trust=%q>\n", tag, attrs, trust) + safe + "\n" + closing
 }
 
 // toolOutcome carries the bookkeeping fields of a finished tool call.

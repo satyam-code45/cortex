@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
+
 	"cortex/internal/api"
 	"cortex/internal/app"
 	"cortex/internal/auth"
@@ -87,6 +89,32 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
+	resumeWorker, err := jobs.NewResumeRunWorker(deps.Orchestrator, logger)
+	if err != nil {
+		return err
+	}
+
+	// The write path exists only where per-user connections do. Without the
+	// builder there is no credential to write with and no registry to resolve an
+	// action against, so the workers are simply not registered — a deployment
+	// that cannot write is one that has no way to.
+	var writeWorker *jobs.ExecuteWriteWorker
+	var expireWorker *jobs.ExpireActionsWorker
+	if deps.ConnectionBuilder != nil {
+		// The queue is injected by jobs.New: these workers enqueue onto the
+		// queue they are registered with, which is a construction cycle broken
+		// there rather than here.
+		writeWorker, err = jobs.NewExecuteWriteWorker(deps.Pool,
+			deps.ConnectionBuilder.WritersForUser, nil, logger)
+		if err != nil {
+			return err
+		}
+		expireWorker, err = jobs.NewExpireActionsWorker(deps.Pool, cfg.ActionTTL, nil, logger)
+		if err != nil {
+			return err
+		}
+	}
+
 	// One process runs both the API and the workers (one binary, one
 	// database). River polls Postgres for jobs, so there is nothing to
 	// coordinate between them beyond sharing the pool.
@@ -94,8 +122,12 @@ func run(logger *slog.Logger) error {
 		Pool:         deps.Pool,
 		Worker:       worker,
 		IndexWorker:  indexWorker,
+		ResumeWorker: resumeWorker,
+		WriteWorker:  writeWorker,
+		ExpireWorker: expireWorker,
 		MaxWorkers:   cfg.AgentRunWorkers,
 		IndexWorkers: cfg.IndexWorkers,
+		WriteWorkers: cfg.WriteActionWorkers,
 		Logger:       logger,
 	})
 	if err != nil {
@@ -113,6 +145,8 @@ func run(logger *slog.Logger) error {
 	logger.Info("queue workers started",
 		"agent_queue", jobs.AgentRunQueue, "agent_workers", cfg.AgentRunWorkers,
 		"index_queue", jobs.IndexSourceQueue, "index_workers", cfg.IndexWorkers,
+		"write_queue", jobs.WriteActionQueue, "write_workers", cfg.WriteActionWorkers,
+		"writes_enabled", writeWorker != nil,
 		"tools", deps.Registry.Len())
 
 	// Auth exists (Google sign-in), but hostCheck still only admits localhost names —
@@ -149,6 +183,8 @@ func run(logger *slog.Logger) error {
 		AdminEmails:          lowered(cfg.AdminEmails),
 		RunsPerUserPerHour:   cfg.RunsPerUserPerHour,
 		IndexRefreshCooldown: cfg.IndexRefreshCooldown,
+		ActionTTL:            cfg.ActionTTL,
+		WriteReadiness:       writeReadiness(deps),
 		OpenAIBaseURL:        cfg.OpenAIBaseURL,
 	})
 
@@ -223,4 +259,14 @@ func isLoopback(host string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+// writeReadiness adapts the connection builder's readiness check for the API,
+// or returns nil when this deployment has no per-user connections — which the
+// handler answers honestly rather than pretending writes can be enabled.
+func writeReadiness(deps *app.Deps) func(ctx context.Context, userID uuid.UUID, source string) error {
+	if deps.ConnectionBuilder == nil {
+		return nil
+	}
+	return deps.ConnectionBuilder.CheckWriteReadiness
 }

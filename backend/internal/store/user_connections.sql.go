@@ -29,7 +29,7 @@ func (q *Queries) DeleteUserConnection(ctx context.Context, arg DeleteUserConnec
 }
 
 const getUserConnection = `-- name: GetUserConnection :one
-SELECT id, user_id, source, credentials_ciphertext, identity, status, last_error, created_at, updated_at FROM user_connections WHERE user_id = $1 AND source = $2
+SELECT id, user_id, source, credentials_ciphertext, identity, status, last_error, created_at, updated_at, writes_enabled FROM user_connections WHERE user_id = $1 AND source = $2
 `
 
 type GetUserConnectionParams struct {
@@ -50,6 +50,7 @@ func (q *Queries) GetUserConnection(ctx context.Context, arg GetUserConnectionPa
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.WritesEnabled,
 	)
 	return i, err
 }
@@ -66,7 +67,7 @@ func (q *Queries) GetUserDemoWorkspace(ctx context.Context, id uuid.UUID) (bool,
 }
 
 const listUserConnections = `-- name: ListUserConnections :many
-SELECT id, user_id, source, credentials_ciphertext, identity, status, last_error, created_at, updated_at FROM user_connections WHERE user_id = $1 ORDER BY source
+SELECT id, user_id, source, credentials_ciphertext, identity, status, last_error, created_at, updated_at, writes_enabled FROM user_connections WHERE user_id = $1 ORDER BY source
 `
 
 func (q *Queries) ListUserConnections(ctx context.Context, userID uuid.UUID) ([]UserConnection, error) {
@@ -88,6 +89,7 @@ func (q *Queries) ListUserConnections(ctx context.Context, userID uuid.UUID) ([]
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.WritesEnabled,
 		); err != nil {
 			return nil, err
 		}
@@ -139,7 +141,7 @@ ON CONFLICT (user_id, source) DO UPDATE
         status                 = 'active',
         last_error             = NULL,
         updated_at             = now()
-RETURNING id, user_id, source, credentials_ciphertext, identity, status, last_error, created_at, updated_at
+RETURNING id, user_id, source, credentials_ciphertext, identity, status, last_error, created_at, updated_at, writes_enabled
 `
 
 type UpsertUserConnectionParams struct {
@@ -169,6 +171,7 @@ func (q *Queries) UpsertUserConnection(ctx context.Context, arg UpsertUserConnec
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.WritesEnabled,
 	)
 	return i, err
 }

@@ -2,6 +2,7 @@
 // JSON in/out, errors come back as {"error": "..."} with a non-2xx status.
 
 import type {
+  AgentAction,
   ChatResponse,
   ConnectionsInfo,
   ConnectionSourceStatus,
@@ -244,8 +245,67 @@ export function putConnectionsMode(
 // URL the "Connect Gmail" button navigates to (a top-level redirect, like
 // googleLoginUrl — the flow goes through Google's consent screen and comes
 // back to /connections).
-export function gmailConnectUrl(): string {
-  return `${API_URL}/api/connections/gmail/connect`;
+//
+// withWrites asks for the send permission as well, and it is a top-level
+// navigation for a reason worth stating: sending mail as somebody needs a fresh
+// consent screen from Google, in which they see the permission named. It cannot
+// be granted by a background request, and should not be.
+export function gmailConnectUrl(withWrites = false): string {
+  const qs = withWrites ? "?writes=1" : "";
+  return `${API_URL}/api/connections/gmail/connect${qs}`;
+}
+
+// PUT /api/connections/{source}/writes — turns writes on or off for one source;
+// returns the fresh overview.
+//
+// Gmail is the exception: enabling it needs the consent screen, so the backend
+// answers 409 and the UI sends the user to gmailConnectUrl(true) instead.
+export function putConnectionWrites(
+  source: SourceName,
+  enabled: boolean,
+): Promise<ConnectionsInfo> {
+  return request<ConnectionsInfo>(`/api/connections/${source}/writes`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+// GET /api/actions — the write audit trail, newest first.
+export function listActions(limit?: number): Promise<AgentAction[]> {
+  const qs = limit === undefined ? "" : `?limit=${limit}`;
+  return request<{ actions: AgentAction[] }>(`/api/actions${qs}`).then(
+    (body) => body.actions ?? [],
+  );
+}
+
+// POST /api/actions/{id}/approve — approves a proposal, optionally with an
+// edited payload.
+//
+// finalPayload is what executes. Omitted means "exactly what was proposed",
+// which must not require the client to echo the payload back — a round trip
+// through a JSON serializer is how a payload gets subtly changed by accident.
+export function approveAction(
+  id: string,
+  finalPayload?: unknown,
+): Promise<AgentAction> {
+  return request<AgentAction>(`/api/actions/${id}/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(
+      finalPayload === undefined ? {} : { final_payload: finalPayload },
+    ),
+  });
+}
+
+// POST /api/actions/{id}/reject — declines a proposal. The reason is required:
+// it is the only thing the agent has to work with when it resumes.
+export function rejectAction(id: string, reason: string): Promise<AgentAction> {
+  return request<AgentAction>(`/api/actions/${id}/reject`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason }),
+  });
 }
 
 // GET /api/documents — the Sources listing with counts and freshness stamps.

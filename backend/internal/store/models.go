@@ -10,6 +10,25 @@ import (
 	"github.com/pgvector/pgvector-go"
 )
 
+type AgentAction struct {
+	ID              uuid.UUID          `json:"id"`
+	AgentRunID      uuid.UUID          `json:"agent_run_id"`
+	UserID          uuid.UUID          `json:"user_id"`
+	Source          string             `json:"source"`
+	Action          string             `json:"action"`
+	ProposedPayload []byte             `json:"proposed_payload"`
+	FinalPayload    []byte             `json:"final_payload"`
+	Status          string             `json:"status"`
+	IdempotencyKey  string             `json:"idempotency_key"`
+	RejectReason    *string            `json:"reject_reason"`
+	Result          []byte             `json:"result"`
+	Error           *string            `json:"error"`
+	ProposedAt      pgtype.Timestamptz `json:"proposed_at"`
+	DecidedAt       pgtype.Timestamptz `json:"decided_at"`
+	ExecutedAt      pgtype.Timestamptz `json:"executed_at"`
+	DecidedBy       *uuid.UUID         `json:"decided_by"`
+}
+
 type AgentRun struct {
 	ID             uuid.UUID          `json:"id"`
 	ConversationID uuid.UUID          `json:"conversation_id"`
@@ -158,6 +177,7 @@ type UserConnection struct {
 	LastError             *string            `json:"last_error"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	WritesEnabled         bool               `json:"writes_enabled"`
 }
 
 type UserLlmKey struct {

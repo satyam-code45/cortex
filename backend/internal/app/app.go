@@ -59,6 +59,14 @@ type Deps struct {
 	Indexer      *rag.Indexer
 	Registry     *tools.Registry
 	Orchestrator *agent.Orchestrator
+	// ConnectionBuilder builds per-user tool and writer registries. Exposed so
+	// the server can wire the write execution worker and the write-readiness
+	// check to the same construction path a run uses — a write must go out
+	// through exactly the client its proposal was validated against.
+	//
+	// Nil when BYOK is off (cmd/eval), which correctly means that process can
+	// neither propose nor execute a write.
+	ConnectionBuilder *connections.RegistryBuilder
 }
 
 // Build connects to Postgres (with a ping check), constructs every source
@@ -179,15 +187,18 @@ func build(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, logger *
 	keyService := keys.NewService(pool, cipher)
 	connectionService := connections.NewService(pool, cipher)
 
+	var connectionBuilder *connections.RegistryBuilder
+
 	agentConfig := agent.Config{
-		DB:                 pool,
-		Provider:           provider,
-		Registry:           registry,
-		Model:              cfg.LLMModel,
-		UtilityModel:       cfg.LLMUtilityModel,
-		MaxIterations:      cfg.MaxIterations,
-		ContextTokenBudget: cfg.ContextTokenBudget,
-		Logger:             logger,
+		DB:                   pool,
+		Provider:             provider,
+		Registry:             registry,
+		Model:                cfg.LLMModel,
+		UtilityModel:         cfg.LLMUtilityModel,
+		MaxIterations:        cfg.MaxIterations,
+		ContextTokenBudget:   cfg.ContextTokenBudget,
+		WritesPerUserPerHour: cfg.WritesPerUserPerHour,
+		Logger:               logger,
 	}
 	if opts.BYOK {
 		// The completion/embedding cut: completions run
@@ -223,16 +234,18 @@ func build(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, logger *
 		// mixed. The demo registry instance is shared so its per-upstream
 		// pacing state stays shared across demo-mode runs.
 		builder, err := connections.NewRegistryBuilder(connections.RegistryBuilderConfig{
-			Service:            connectionService,
-			Demo:               registry,
-			GoogleClientID:     cfg.GoogleOAuthClientID,
-			GoogleClientSecret: cfg.GoogleOAuthClientSecret,
-			Logger:             logger,
+			Service:                 connectionService,
+			Demo:                    registry,
+			GoogleClientID:          cfg.GoogleOAuthClientID,
+			GoogleClientSecret:      cfg.GoogleOAuthClientSecret,
+			GmailSendAllowedDomains: cfg.GmailSendAllowedDomains,
+			Logger:                  logger,
 		})
 		if err != nil {
 			return nil, err
 		}
 		agentConfig.RegistryForUser = builder.ForUser
+		connectionBuilder = builder
 	}
 	orchestrator, err := agent.New(agentConfig)
 	if err != nil {
@@ -240,16 +253,17 @@ func build(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, logger *
 	}
 
 	return &Deps{
-		Pool:         pool,
-		Provider:     provider,
-		Keys:         keyService,
-		Connections:  connectionService,
-		JiraClient:   jiraClient,
-		NotionClient: notionClient,
-		GmailClient:  gmailClient,
-		Indexer:      indexer,
-		Registry:     registry,
-		Orchestrator: orchestrator,
+		Pool:              pool,
+		Provider:          provider,
+		Keys:              keyService,
+		Connections:       connectionService,
+		JiraClient:        jiraClient,
+		NotionClient:      notionClient,
+		GmailClient:       gmailClient,
+		Indexer:           indexer,
+		Registry:          registry,
+		Orchestrator:      orchestrator,
+		ConnectionBuilder: connectionBuilder,
 	}, nil
 }
 

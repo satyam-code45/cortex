@@ -31,8 +31,13 @@ var privatePatterns = []struct {
 	pattern string
 }{
 	{
-		name:    "internal requirement and test ids",
-		pattern: "RE" + "Q-[0-9]+\\.[0-9]|TE" + "ST-[0-9]+\\.[0-9]",
+		name: "internal requirement and test ids",
+		// The suffix class allows a letter, not just a digit: the ids that
+		// actually leaked were review findings numbered per day with a letter
+		// (a bug id, a follow-up test id), and a digit-only class walked past
+		// every one of them.
+		pattern: "RE" + "Q-[0-9]+\\.[0-9A-Za-z]|TE" + "ST-[0-9]+\\.[0-9A-Za-z]" +
+			"|BU" + "G-[0-9]+\\.[0-9A-Za-z]|EV" + "AL-[0-9]+\\.[0-9A-Za-z]",
 	},
 	{
 		name:    "private planning document names",

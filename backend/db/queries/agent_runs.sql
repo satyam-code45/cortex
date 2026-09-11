@@ -56,3 +56,70 @@ SET status = 'running'
 WHERE id = $1
   AND status IN ('pending', 'running')
 RETURNING *;
+
+-- name: PauseAgentRun :one
+-- running -> awaiting_approval. The status guard keeps the transition honest for
+-- a run that raced to a terminal state; no rows means there is nothing to pause.
+--
+-- finished_at stays NULL: the run is not finished, it is waiting. Token totals
+-- are stored so a paused run's cost is visible before it resumes, and because a
+-- resume rebuilds them from the event log rather than from memory.
+UPDATE agent_runs
+SET status        = 'awaiting_approval',
+    input_tokens  = $2,
+    output_tokens = $3
+WHERE id = $1
+  AND status = 'running'
+RETURNING *;
+
+-- name: ResumeAgentRun :one
+-- awaiting_approval -> running, claiming a paused run for the resume job.
+--
+-- 'running' is admitted alongside 'awaiting_approval' for the same reason
+-- StartAgentRun admits it: a resume job retried after its worker was killed
+-- mid-loop must be able to pick the run back up. Anything terminal matches
+-- nothing, so a run that already answered cannot be resumed into a second life.
+UPDATE agent_runs
+SET status = 'running'
+WHERE id = $1
+  AND status IN ('awaiting_approval', 'running')
+RETURNING *;
+
+-- name: GetAgentRun :one
+SELECT * FROM agent_runs WHERE id = $1;
+
+-- name: LockAgentRunForSettlement :one
+-- Serializes the settle-and-resume decision for one run.
+--
+-- Every path that settles an action asks, in the same transaction, "is anything
+-- on this run still outstanding?" and enqueues the resume only when the answer
+-- is no. Under READ COMMITTED that question is unsafe when two actions on one
+-- run are settled concurrently: each transaction sees its own settlement plus
+-- the OTHER row in its pre-commit state, so both count one outstanding action
+-- and neither enqueues a resume. The run then sits in 'awaiting_approval'
+-- forever — the expiry sweep only looks at 'pending' rows, so nothing would
+-- ever find it again.
+--
+-- Taking this lock as the first statement of each settling transaction makes
+-- those transactions run one at a time per run, so the second one sees the
+-- first's committed settlement and enqueues exactly one resume. It locks the
+-- run row rather than using an advisory lock so the lock is released by COMMIT
+-- with no separate unlock to leak.
+SELECT id FROM agent_runs WHERE id = $1 FOR UPDATE;
+
+-- name: ListResumableStalledRuns :many
+-- The liveness backstop: runs paused for a decision that has already been made.
+--
+-- A run reaches this state only through a bug — the lock above is what prevents
+-- it — but "the investigation never answers and nothing in the system can find
+-- it" is a bad enough outcome to warrant a cheap sweep that cannot be reasoned
+-- wrong. Ordered by id so a batch locks runs in a deterministic order.
+SELECT r.id FROM agent_runs r
+WHERE r.status = 'awaiting_approval'
+  AND NOT EXISTS (
+    SELECT 1 FROM agent_actions a
+    WHERE a.agent_run_id = r.id
+      AND a.status IN ('pending', 'approved', 'executing')
+  )
+ORDER BY r.id
+LIMIT $1;

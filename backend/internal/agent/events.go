@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -55,6 +56,30 @@ const (
 	EventRunFinished = "run_finished"
 	// EventRunFailed closes a failed run.
 	EventRunFailed = "run_failed"
+
+	// EventActionProposed records a write the agent wants performed, with the
+	// complete payload it proposed. Observability, not conversation: the
+	// observation the model actually saw is in the accompanying
+	// tool_call_finished event, and it is that text a replay feeds back.
+	EventActionProposed = "action_proposed"
+	// EventRunPaused records the loop stopping to wait for a human. It closes
+	// the event stream — nothing further will happen on this run until somebody
+	// decides — so the browser keeps the approval cards on screen and reopens
+	// the stream after it posts a decision.
+	EventRunPaused = "run_paused"
+	// EventActionDecided records a human's approve or reject, with who decided
+	// and when. This is the audit half of the gate: the row carries the same
+	// facts, and the event puts them in the run's own timeline.
+	EventActionDecided = "action_decided"
+	// EventActionExecuted records a write that landed, with what the upstream
+	// system returned.
+	EventActionExecuted = "action_executed"
+	// EventActionFailed records a write that was attempted and failed. Distinct
+	// from a rejection: somebody approved this one, and it did not happen.
+	EventActionFailed = "action_failed"
+	// EventRunResumed records the loop picking back up after every proposal was
+	// decided, and carries the decisions being fed back to the model.
+	EventRunResumed = "run_resumed"
 )
 
 // LLM call purposes recorded on llm_calls.purpose and in llm_call events.
@@ -70,6 +95,16 @@ const (
 	// PurposeFinalAnswer is the forced answer after the iteration cap is hit.
 	PurposeFinalAnswer = "final_answer"
 
+	// PurposeResume is the first call after a run was paused for a human
+	// decision on a proposed write.
+	//
+	// It has its own value because it must not be mistaken for a completeness
+	// check. Both open with an injected turn, so inferring the purpose from
+	// "is there something injected" labelled every resumed run's first call a
+	// completeness check — which made the trace wrong and, worse, made
+	// replayProgress believe the check had already happened, so a run that
+	// paused twice would accept its first draft unreviewed.
+	PurposeResume = "resume"
 	// PurposeCompletenessCheck is the one call per run that re-reads the model's
 	// own draft answer against the question before it is accepted.
 	PurposeCompletenessCheck = "completeness_check"
@@ -230,6 +265,102 @@ type runFailedPayload struct {
 	Error      string `json:"error"`
 	Iterations int    `json:"iterations"`
 	LatencyMS  int64  `json:"latency_ms"`
+}
+
+// actionProposedPayload is the payload of EventActionProposed.
+//
+// Payload is the proposal verbatim. The approval UI renders it field by field
+// from here rather than from a summary, because a human approving a paraphrase
+// of an email has not approved the email — and because this event is the audit
+// record of what the agent asked for, which must survive any later edit to the
+// row's final payload.
+type actionProposedPayload struct {
+	Iteration  int             `json:"iteration"`
+	ActionID   uuid.UUID       `json:"action_id"`
+	ToolCallID string          `json:"tool_call_id"`
+	Tool       string          `json:"tool"`
+	Source     string          `json:"source"`
+	Action     string          `json:"action"`
+	Summary    string          `json:"summary"`
+	Payload    json.RawMessage `json:"payload"`
+}
+
+// runPausedPayload is the payload of EventRunPaused.
+type runPausedPayload struct {
+	Iteration int `json:"iteration"`
+	// Waiting lists the actions the run is blocked on, so a client that joined
+	// the stream late knows what to render without a second request.
+	Waiting []pausedAction `json:"waiting"`
+	// IterationsUsed and the token totals are carried so a paused run's cost is
+	// legible before it resumes.
+	IterationsUsed int `json:"iterations_used"`
+	InputTokens    int `json:"input_tokens"`
+	OutputTokens   int `json:"output_tokens"`
+}
+
+// pausedAction identifies one action a paused run is waiting on.
+type pausedAction struct {
+	ActionID uuid.UUID `json:"action_id"`
+	Source   string    `json:"source"`
+	Action   string    `json:"action"`
+	Summary  string    `json:"summary"`
+}
+
+// actionDecidedPayload is the payload of EventActionDecided.
+type actionDecidedPayload struct {
+	ActionID uuid.UUID `json:"action_id"`
+	Action   string    `json:"action"`
+	Status   string    `json:"status"`
+	Reason   string    `json:"reason,omitempty"`
+	// DecidedBy is the deciding user's id, and DecidedAt when. Both are on the
+	// row too; they are duplicated here because the trace panel renders from
+	// events alone, and a timeline that shows a pause with no visible decision is
+	// missing the part a reader most wants.
+	//
+	// Only the action's own owner can decide it — the endpoints enforce that in
+	// SQL — so the id always resolves to the run's owner, and the UI can say
+	// "you" rather than rendering a UUID at somebody.
+	DecidedBy *uuid.UUID `json:"decided_by,omitempty"`
+	DecidedAt time.Time  `json:"decided_at"`
+	// Edited reports whether the approved payload differs from the proposed
+	// one. It is the single fact an auditor most wants at a glance, and
+	// computing it here means the UI never has to diff two JSON blobs to
+	// answer it.
+	Edited bool `json:"edited"`
+}
+
+// actionExecutedPayload is the payload of EventActionExecuted.
+type actionExecutedPayload struct {
+	ActionID uuid.UUID      `json:"action_id"`
+	Action   string         `json:"action"`
+	Summary  string         `json:"summary"`
+	Result   map[string]any `json:"result,omitempty"`
+}
+
+// actionFailedPayload is the payload of EventActionFailed.
+type actionFailedPayload struct {
+	ActionID uuid.UUID `json:"action_id"`
+	Action   string    `json:"action"`
+	Error    string    `json:"error"`
+}
+
+// runResumedPayload is the payload of EventRunResumed.
+//
+// Decisions is what the model is about to be told, recorded before the call that
+// tells it. The text itself is replayed from the following llm_call's injected
+// messages — this event is the human-readable "why did the loop start again",
+// which the trace panel shows and a replay ignores.
+type runResumedPayload struct {
+	Iteration int              `json:"iteration"`
+	Decisions []resumeDecision `json:"decisions"`
+}
+
+// resumeDecision is one decided action as reported back into the loop.
+type resumeDecision struct {
+	ActionID uuid.UUID `json:"action_id"`
+	Action   string    `json:"action"`
+	Status   string    `json:"status"`
+	Outcome  string    `json:"outcome"`
 }
 
 // eventMessage is a conversation turn as stored in an event payload.
@@ -430,6 +561,16 @@ func ReconstructTranscript(events []store.RunEvent) (system string, messages []l
 			// the only events that contribute to the transcript.
 			// tool_call_started, citations, answer, run_finished and
 			// run_failed are observability, not conversation.
+			//
+			// The approval events are observability too, which is worth being
+			// explicit about because it looks like an omission. A proposal
+			// reaches the model as an ordinary tool observation, so
+			// tool_call_finished already replays it; a human's decision reaches
+			// it as an injected turn on the next llm_call, so that event already
+			// replays it. action_proposed, run_paused, action_decided,
+			// action_executed, action_failed and run_resumed are the audit and
+			// timeline record of the same facts. Replaying them here would
+			// duplicate every one of them into the transcript.
 		}
 	}
 	return system, messages, nil

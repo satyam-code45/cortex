@@ -1,6 +1,6 @@
 "use client";
 
-// The app-wide header: brand, Chat/Sources navigation, and the identity
+// The app-wide header: brand, primary navigation, and the identity
 // cluster (settings, avatar + name, logout, theme). Hidden on /login — that
 // page has no session to render.
 
@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 const navItems = [
   { href: "/", label: "Chat" },
   { href: "/sources", label: "Sources" },
+  { href: "/actions", label: "Actions" },
   { href: "/connections", label: "Connections" },
 ];
 

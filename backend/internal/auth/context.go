@@ -16,6 +16,17 @@ type User struct {
 	// IsAdmin is set by the middleware: true for the bearer token, and for a
 	// session whose email is in ADMIN_EMAILS.
 	IsAdmin bool
+	// Machine is true when the principal is the static operator token rather
+	// than a signed-in person.
+	//
+	// It exists because one guarantee in this system is specifically about a
+	// HUMAN: a write executes only after somebody read the payload and approved
+	// it. The bearer token is a shared operator credential that scripts carry —
+	// it appears in shell history and CI config — so admitting it on a decision
+	// endpoint would let a token holder authorize mail from the owner's mailbox
+	// with no human ever having looked. Admin rights are not the question here;
+	// being a person is.
+	Machine bool
 }
 
 type ctxKey struct{}

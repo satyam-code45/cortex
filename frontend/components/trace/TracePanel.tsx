@@ -8,7 +8,16 @@
 // same run_events rows). One derivation, two feeds — the panel cannot drift
 // between live and browsable.
 
-import { Brain, Quote } from "lucide-react";
+import {
+  Brain,
+  CheckCircle2,
+  PauseCircle,
+  PlayCircle,
+  Quote,
+  Send,
+  UserCheck,
+  XCircle,
+} from "lucide-react";
 import { useMemo } from "react";
 
 import { Separator } from "@/components/ui/separator";
@@ -19,11 +28,17 @@ import {
   formatLatency,
 } from "@/components/trace/ToolCallCard";
 import type {
+  ActionDecidedPayload,
+  ActionExecutedPayload,
+  ActionFailedPayload,
+  ActionProposedPayload,
   CitationsPayload,
   LLMCallPayload,
   RunEvent,
   RunFailedPayload,
   RunFinishedPayload,
+  RunPausedPayload,
+  RunResumedPayload,
   ToolCallFinishedPayload,
   ToolCallStartedPayload,
   Trace,
@@ -40,7 +55,16 @@ interface Props {
 type FeedItem =
   | { kind: "tool_call"; seq: number; call: ToolCallView }
   | { kind: "llm_call"; seq: number; payload: LLMCallPayload }
-  | { kind: "citations"; seq: number; payload: CitationsPayload };
+  | { kind: "citations"; seq: number; payload: CitationsPayload }
+  // The approval gate's own rows. They belong in this feed rather than only in
+  // the chat, because the trace is the record of how an answer was reached — and
+  // "a person was asked, and said no" is as much a part of that as a tool call.
+  | { kind: "note"; seq: number; icon: NoteIcon; text: string; tone: NoteTone };
+
+// NoteIcon and NoteTone keep the note rows renderable without a component per
+// event type.
+type NoteIcon = "proposed" | "paused" | "decided" | "executed" | "failed" | "resumed";
+type NoteTone = "muted" | "warn" | "good" | "bad";
 
 interface PanelView {
   items: FeedItem[];
@@ -137,6 +161,91 @@ function deriveView(events: RunEvent[]): PanelView {
         phase = "Attaching citations…";
         break;
       }
+      case "action_proposed": {
+        const p = event.payload as ActionProposedPayload;
+        items.push({
+          kind: "note",
+          seq: event.seq,
+          icon: "proposed",
+          text: `proposed: ${p.summary}`,
+          tone: "warn",
+        });
+        break;
+      }
+      case "run_paused": {
+        const p = event.payload as RunPausedPayload;
+        const count = p.waiting?.length ?? 0;
+        items.push({
+          kind: "note",
+          seq: event.seq,
+          icon: "paused",
+          text:
+            count === 1
+              ? "paused — waiting for a decision on 1 action"
+              : `paused — waiting for a decision on ${count} actions`,
+          tone: "warn",
+        });
+        phase = "Waiting for your decision";
+        break;
+      }
+      case "action_decided": {
+        const p = event.payload as ActionDecidedPayload;
+        // Who and when. "you" rather than the raw id: only the run's owner can
+        // decide its actions, so the id is always theirs, and a UUID in a
+        // timeline tells a reader nothing.
+        const what =
+          p.status === "rejected"
+            ? `declined${p.reason ? `: ${p.reason}` : ""}`
+            : p.edited
+              ? "approved by you, with edits"
+              : "approved by you";
+        items.push({
+          kind: "note",
+          seq: event.seq,
+          icon: "decided",
+          text: `${p.action} ${what}${clockTime(p.decided_at)}`,
+          tone: p.status === "rejected" ? "muted" : "good",
+        });
+        break;
+      }
+      case "action_executed": {
+        const p = event.payload as ActionExecutedPayload;
+        items.push({
+          kind: "note",
+          seq: event.seq,
+          icon: "executed",
+          text: p.summary || `${p.action} carried out`,
+          tone: "good",
+        });
+        break;
+      }
+      case "action_failed": {
+        const p = event.payload as ActionFailedPayload;
+        items.push({
+          kind: "note",
+          seq: event.seq,
+          icon: "failed",
+          text: `${p.action} failed: ${p.error}`,
+          tone: "bad",
+        });
+        break;
+      }
+      case "run_resumed": {
+        const p = event.payload as RunResumedPayload;
+        const count = p.decisions?.length ?? 0;
+        items.push({
+          kind: "note",
+          seq: event.seq,
+          icon: "resumed",
+          text:
+            count === 1
+              ? "resumed with 1 decision"
+              : `resumed with ${count} decisions`,
+          tone: "muted",
+        });
+        phase = "Investigating…";
+        break;
+      }
       case "answer":
         phase = "Answer ready";
         break;
@@ -209,6 +318,8 @@ export function TracePanel({ runId, stream, trace }: Props) {
           {view.items.map((item) =>
             item.kind === "tool_call" ? (
               <ToolCallCard key={item.seq} call={item.call} />
+            ) : item.kind === "note" ? (
+              <NoteRow key={item.seq} item={item} />
             ) : item.kind === "llm_call" ? (
               <div
                 key={item.seq}
@@ -258,4 +369,52 @@ export function TracePanel({ runId, stream, trace }: Props) {
       </footer>
     </div>
   );
+}
+
+// NoteRow renders one approval-gate row.
+function NoteRow({
+  item,
+}: {
+  item: Extract<FeedItem, { kind: "note" }>;
+}) {
+  const Icon =
+    item.icon === "paused"
+      ? PauseCircle
+      : item.icon === "decided"
+        ? UserCheck
+        : item.icon === "executed"
+          ? CheckCircle2
+          : item.icon === "failed"
+            ? XCircle
+            : item.icon === "resumed"
+              ? PlayCircle
+              : Send;
+  const tone =
+    item.tone === "warn"
+      ? "text-amber-600"
+      : item.tone === "good"
+        ? "text-emerald-600"
+        : item.tone === "bad"
+          ? "text-destructive"
+          : "text-muted-foreground";
+
+  return (
+    <div className={`flex items-start gap-2 px-1 text-xs ${tone}`}>
+      <Icon className="mt-0.5 size-3.5 shrink-0" />
+      <span className="min-w-0 break-words">{item.text}</span>
+    </div>
+  );
+}
+
+// clockTime renders a decision timestamp as " · 14:32", or nothing when the
+// value is missing or unparseable — events recorded before decided_at existed
+// have none, and a trace of an old run must still render.
+function clockTime(iso: string | undefined): string {
+  if (!iso) return "";
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "";
+  return ` · ${at.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  })}`;
 }

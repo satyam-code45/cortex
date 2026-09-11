@@ -124,6 +124,15 @@ func withSignInWant(want config.Config) config.Config {
 	if want.IndexRefreshCooldown == 0 {
 		want.IndexRefreshCooldown = config.DefaultIndexRefreshCooldown
 	}
+	if want.ActionTTL == 0 {
+		want.ActionTTL = config.DefaultActionTTL
+	}
+	if want.WritesPerUserPerHour == 0 {
+		want.WritesPerUserPerHour = config.DefaultWritesPerUserPerHour
+	}
+	if want.WriteActionWorkers == 0 {
+		want.WriteActionWorkers = config.DefaultWriteActionWorkers
+	}
 	return want
 }
 

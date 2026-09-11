@@ -69,6 +69,27 @@ const (
 	// Sources refreshes. The upstream APIs are paginated and rate-limited; a
 	// 15-minute-fresh local copy beats a live crawl per page view.
 	DefaultIndexRefreshCooldown = 15 * time.Minute
+	// DefaultActionTTL is how long a proposed write waits for a human before it
+	// expires and can no longer be carried out.
+	//
+	// A day: a working day plus a night, so a proposal made at 5pm is still
+	// there in the morning — and short enough that an email drafted from last
+	// week's context cannot be approved into today's situation. An approval is a
+	// judgement about a moment, and the moment does not last indefinitely.
+	DefaultActionTTL = 24 * time.Hour
+	// DefaultWritesPerUserPerHour bounds how many writes one user can have
+	// carried out per hour.
+	//
+	// Separate from the run limit and much lower, because it bounds something
+	// different. A run costs quota; a write reaches other people, and twenty
+	// emails or tickets an hour is already far more than a person can
+	// meaningfully approve one at a time. The limit is a backstop against a
+	// runaway loop, not a throughput target.
+	DefaultWritesPerUserPerHour = 20
+	// DefaultWriteActionWorkers is the concurrency on the write queue. Two: a
+	// write is one HTTP request, and the queue also carries the expiry sweep,
+	// which must not sit behind a slow send.
+	DefaultWriteActionWorkers = 2
 )
 
 // Config holds every setting the server needs. Fields map 1:1 to the variables
@@ -177,6 +198,18 @@ type Config struct {
 	// IndexRefreshCooldown is the minimum interval between user-triggered
 	// Sources refreshes.
 	IndexRefreshCooldown time.Duration
+
+	// ActionTTL is how long a proposed write stays decidable.
+	ActionTTL time.Duration
+	// WritesPerUserPerHour caps executed writes per user; a proposal beyond it
+	// is refused at proposal time, so the agent can say so in its answer.
+	WritesPerUserPerHour int
+	// WriteActionWorkers is the concurrency on the write execution queue.
+	WriteActionWorkers int
+	// GmailSendAllowedDomains restricts the domains a proposed email may be
+	// addressed to. Empty — the default — allows any: a policy nobody
+	// configured should not silently disable the feature.
+	GmailSendAllowedDomains []string
 }
 
 // String renders the configuration with its secrets redacted.
@@ -195,7 +228,8 @@ func (c Config) String() string {
 		"GmailCredentialsPath:%s GmailTokenPath:%s GmailQueryScope:%s "+
 		"GoogleOAuthClientID:%s GoogleOAuthClientSecret:%s AuthAllowedEmails:%s "+
 		"AuthAPIToken:%s AdminEmails:%s DevUserEmail:%s LLMKeyEncryptionSecret:%s "+
-		"RunsPerUserPerHour:%d IndexRefreshCooldown:%s}",
+		"RunsPerUserPerHour:%d IndexRefreshCooldown:%s "+
+		"ActionTTL:%s WritesPerUserPerHour:%d WriteActionWorkers:%d GmailSendAllowedDomains:%s}",
 		redactDSN(c.DatabaseURL), c.Host, c.Port, c.FrontendOrigin,
 		redact(c.OpenAIAPIKey), c.OpenAIBaseURL, c.LLMModel, c.LLMUtilityModel, c.EmbeddingModel,
 		c.MaxIterations, c.AgentRunWorkers, c.ContextTokenBudget, c.IndexMaxDocuments, c.IndexWorkers,
@@ -204,7 +238,9 @@ func (c Config) String() string {
 		c.GmailCredentialsPath, c.GmailTokenPath, c.GmailQueryScope,
 		c.GoogleOAuthClientID, redact(c.GoogleOAuthClientSecret), strings.Join(c.AuthAllowedEmails, ","),
 		redact(c.AuthAPIToken), strings.Join(c.AdminEmails, ","), c.DevUserEmail, redact(c.LLMKeyEncryptionSecret),
-		c.RunsPerUserPerHour, c.IndexRefreshCooldown)
+		c.RunsPerUserPerHour, c.IndexRefreshCooldown,
+		c.ActionTTL, c.WritesPerUserPerHour, c.WriteActionWorkers,
+		strings.Join(c.GmailSendAllowedDomains, ","))
 }
 
 // redactDSN strips the password from a Postgres connection string.
@@ -278,6 +314,11 @@ func Load() (*Config, error) {
 		LLMKeyEncryptionSecret:  strings.TrimSpace(os.Getenv("LLM_KEY_ENCRYPTION_SECRET")),
 		RunsPerUserPerHour:      envInt("RUNS_PER_USER_PER_HOUR", DefaultRunsPerUserPerHour),
 		IndexRefreshCooldown:    envDuration("INDEX_REFRESH_COOLDOWN", DefaultIndexRefreshCooldown),
+
+		ActionTTL:               envDuration("ACTION_TTL", DefaultActionTTL),
+		WritesPerUserPerHour:    envInt("WRITES_PER_USER_PER_HOUR", DefaultWritesPerUserPerHour),
+		WriteActionWorkers:      envInt("WRITE_ACTION_WORKERS", DefaultWriteActionWorkers),
+		GmailSendAllowedDomains: envList("GMAIL_SEND_ALLOWED_DOMAINS"),
 	}
 	if len(cfg.AdminEmails) == 0 {
 		cfg.AdminEmails = []string{cfg.DevUserEmail}

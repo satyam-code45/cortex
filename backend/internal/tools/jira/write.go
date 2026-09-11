@@ -7,16 +7,18 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
 
-// Write operations, used only by cmd/seed.
+// Write operations against Jira.
 //
-// No agent tool calls anything in this file. The agent's Jira surface is
-// read-only by design — nothing a model can invoke mutates Jira; seeding is an
-// operator action performed by a CLI, which is a different trust boundary
-// entirely.
+// Two callers, with very different trust boundaries, and the distinction is
+// worth keeping straight. cmd/seed calls these directly: seeding is an operator
+// action performed by a human at a CLI. The agent's write tools do NOT — they
+// propose, and a human approves, and only then does the execution job reach this
+// file. Nothing a model can invoke mutates Jira without a person in between.
 //
 // These exist because Jira history cannot be fabricated. The REST API refuses
 // to backdate `created` or to insert changelog rows, so the only way
@@ -49,6 +51,15 @@ type Project struct {
 	ID   json.Number `json:"id"`
 	Key  string      `json:"key"`
 	Name string      `json:"name"`
+	// IssueTypes is populated by GET /rest/api/3/project/{key} and empty on the
+	// project-search response. It is read at proposal time so an unknown issue
+	// type is caught before a human is asked to approve an issue Jira will
+	// refuse.
+	IssueTypes []struct {
+		ID      string `json:"id"`
+		Name    string `json:"name"`
+		Subtask bool   `json:"subtask"`
+	} `json:"issueTypes"`
 }
 
 // Account describes the account an API token authenticates as. Email may be
@@ -467,4 +478,86 @@ func sanitizeLabels(labels []string) []string {
 		out = append(out, cleaned)
 	}
 	return out
+}
+
+// IssueUpdate is a set of field changes to apply to an existing issue.
+//
+// Every field is a pointer so that "not mentioned" and "set to empty" stay
+// distinguishable. A human editing an approved payload may well want to clear a
+// due date or strip the labels, and a plain string could not express that
+// without also making every unmentioned field a silent clear.
+type IssueUpdate struct {
+	Summary     *string
+	Description *string
+	DueDate     *string
+	Labels      *[]string
+}
+
+// Empty reports whether the update would change nothing.
+func (u IssueUpdate) Empty() bool {
+	return u.Summary == nil && u.Description == nil && u.DueDate == nil && u.Labels == nil
+}
+
+// UpdateIssue applies field changes to one issue.
+//
+// Unlike CreateIssue this does NOT shed fields and retry. Shedding is right when
+// seeding hundreds of fixtures into an unknown project template — losing a
+// decorative priority beats failing the whole run. It is wrong here: a human
+// approved a specific set of changes, and quietly applying some of them is worse
+// than applying none and saying which field the project rejected.
+func (c *Client) UpdateIssue(ctx context.Context, issueKey string, update IssueUpdate) error {
+	key, err := normalizeIssueKey(issueKey)
+	if err != nil {
+		return err
+	}
+	if update.Empty() {
+		return fmt.Errorf("jira: update of %s changes no fields", key)
+	}
+
+	fields := map[string]any{}
+	if update.Summary != nil {
+		fields["summary"] = *update.Summary
+	}
+	if update.Description != nil {
+		fields["description"] = TextToADF(*update.Description)
+	}
+	if update.DueDate != nil {
+		// An empty string clears the date; Jira wants null rather than "".
+		if *update.DueDate == "" {
+			fields["duedate"] = nil
+		} else {
+			fields["duedate"] = *update.DueDate
+		}
+	}
+	if update.Labels != nil {
+		fields["labels"] = sanitizeLabels(*update.Labels)
+	}
+
+	if err := c.put(ctx, "/rest/api/3/issue/"+url.PathEscape(key), map[string]any{"fields": fields}, nil); err != nil {
+		return fmt.Errorf("update %s: %w", key, err)
+	}
+	return nil
+}
+
+// IssueTypeNames lists the issue type names a project accepts, sorted.
+//
+// A read, used at proposal time so an unknown issue type comes back to the model
+// as a correctable observation naming the valid ones — rather than as a 400 after
+// a human has already approved the issue.
+func (c *Client) IssueTypeNames(ctx context.Context, projectKey string) ([]string, error) {
+	project, err := c.GetProject(ctx, projectKey)
+	if err != nil {
+		return nil, err
+	}
+	if project == nil {
+		return nil, fmt.Errorf("jira: no project %q", projectKey)
+	}
+	names := make([]string, 0, len(project.IssueTypes))
+	for _, t := range project.IssueTypes {
+		if t.Name != "" {
+			names = append(names, t.Name)
+		}
+	}
+	sort.Strings(names)
+	return names, nil
 }

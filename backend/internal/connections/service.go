@@ -20,6 +20,7 @@ import (
 	"cortex/internal/agent"
 	"cortex/internal/keys"
 	"cortex/internal/store"
+	"cortex/internal/tools/gmail"
 )
 
 // Source names, matching the user_connections.source CHECK constraint.
@@ -57,6 +58,16 @@ type NotionCredentials struct {
 // GmailCredentials is the plaintext shape encrypted for a gmail connection.
 type GmailCredentials struct {
 	RefreshToken string `json:"refresh_token"`
+	// Scopes is the space-separated scope list Google actually granted, as
+	// reported by the token response.
+	//
+	// Stored because it is the only way to answer "can this token send mail?"
+	// without trying to send mail. A refresh token minted for gmail.readonly
+	// looks identical to one minted for readonly plus send, and discovering the
+	// difference at execution time would mean a person approving an email that
+	// then cannot go out. Absent on connections made before writes existed,
+	// which correctly reads as "no send scope" and requires re-consent.
+	Scopes string `json:"scopes,omitempty"`
 }
 
 // Info is what the API may show about a connection: identity and status,
@@ -69,6 +80,10 @@ type Info struct {
 	LastError string // safe message, set only when Status == "error"
 	Identity  json.RawMessage
 	UpdatedAt time.Time
+	// WritesEnabled reports whether this connection may propose writes. False
+	// by default and for every connection that predates writes: a read
+	// connection never becomes a write connection by accident.
+	WritesEnabled bool
 }
 
 // Service is the one path to the user_connections table. Everything above it
@@ -155,10 +170,11 @@ func (s *Service) List(ctx context.Context, userID uuid.UUID) ([]Info, error) {
 	infos := make([]Info, 0, len(rows))
 	for _, row := range rows {
 		info := Info{
-			Source:    row.Source,
-			Status:    row.Status,
-			Identity:  json.RawMessage(row.Identity),
-			UpdatedAt: row.UpdatedAt.Time,
+			Source:        row.Source,
+			Status:        row.Status,
+			Identity:      json.RawMessage(row.Identity),
+			UpdatedAt:     row.UpdatedAt.Time,
+			WritesEnabled: row.WritesEnabled,
 		}
 		if row.LastError != nil {
 			info.LastError = *row.LastError
@@ -182,6 +198,44 @@ func (s *Service) Delete(ctx context.Context, userID uuid.UUID, source string) e
 		return ErrNoConnection
 	}
 	return nil
+}
+
+// SetWritesEnabled turns writes on or off for one source. ErrNoConnection when
+// none was stored.
+//
+// A pure database flip: whether the credential can actually perform writes is
+// checked before this is called, by the handler, which can build a client and
+// ask. Splitting it that way keeps the one path to this table free of network
+// calls, and means disabling writes — which needs no permission at all — never
+// depends on an upstream system being reachable.
+func (s *Service) SetWritesEnabled(ctx context.Context, userID uuid.UUID, source string, enabled bool) error {
+	rows, err := store.New(s.db).SetUserConnectionWrites(ctx, store.SetUserConnectionWritesParams{
+		UserID:        userID,
+		Source:        source,
+		WritesEnabled: enabled,
+	})
+	if err != nil {
+		return fmt.Errorf("connections: set writes enabled: %w", err)
+	}
+	if rows == 0 {
+		return ErrNoConnection
+	}
+	return nil
+}
+
+// GmailCanSend reports whether a stored Gmail credential carries the send scope.
+//
+// The scope list arrives as one space-separated string, so the check splits it
+// and compares each entry exactly. Scanning the entries rather than testing the
+// whole string is what matters here: Google returns granted scopes in an
+// unpredictable order and may include others the sign-in flow asked for.
+func GmailCanSend(creds GmailCredentials) bool {
+	for _, scope := range strings.Fields(creds.Scopes) {
+		if scope == gmail.ScopeSend {
+			return true
+		}
+	}
+	return false
 }
 
 // MarkError records that a stored credential stopped working (e.g. a revoked

@@ -51,6 +51,20 @@ type Enqueuer interface {
 	// NewestFinalizedIndexJob reports when the most recent index job finished,
 	// and whether any has. It drives the Sources refresh cooldown.
 	NewestFinalizedIndexJob(ctx context.Context) (finishedAt time.Time, ok bool, err error)
+
+	// EnqueueExecuteWrite queues an approved write. It takes the transaction
+	// for the same reason the agent-run enqueue does, and the stakes are
+	// higher: the job must become visible only when the approval commits, so
+	// there is no window in which a worker could send an email whose approval
+	// was then rolled back.
+	EnqueueExecuteWrite(ctx context.Context, tx pgx.Tx, actionID uuid.UUID) error
+
+	// EnqueueResumeRun continues a paused run. It takes the transaction because
+	// the caller decides whether to resume from inside it — reading its own
+	// uncommitted decision — and a job that became visible before that commit
+	// would read the pre-decision state, find work still outstanding, and do
+	// nothing, leaving the run waiting forever.
+	EnqueueResumeRun(ctx context.Context, tx pgx.Tx, runID uuid.UUID) error
 }
 
 // Deps are the collaborators the handlers need.
@@ -91,6 +105,11 @@ type Deps struct {
 	// RunsPerUserPerHour caps run creation per user; 0 disables the limit
 	// (tests), production always sets it.
 	RunsPerUserPerHour int
+	// ActionTTL is how long a proposed write stays decidable. The approve
+	// endpoint enforces it in the same predicate as the status check, and the
+	// audit list uses it to report whether a row can still be acted on. Zero
+	// disables expiry.
+	ActionTTL time.Duration
 	// IndexRefreshCooldown is the minimum interval between user-triggered
 	// Sources refreshes.
 	IndexRefreshCooldown time.Duration
@@ -110,6 +129,12 @@ type Deps struct {
 	// GmailBaseURL overrides the Gmail API root for the connect flow's
 	// mailbox validation; tests point it at an httptest server.
 	GmailBaseURL string
+	// WriteReadiness checks whether one source's stored credential can actually
+	// perform writes, before the flag is flipped. A function rather than the
+	// registry builder itself, so the HTTP layer depends on the question it asks
+	// rather than on how connections are built. Nil means this deployment cannot
+	// enable writes at all, which the handler answers honestly.
+	WriteReadiness func(ctx context.Context, userID uuid.UUID, source string) error
 }
 
 // Server holds the handler dependencies.
@@ -164,6 +189,10 @@ func NewRouter(deps Deps) http.Handler {
 		r.Delete("/connections/{source}", s.handleDeleteConnection)
 		r.Get("/connections/gmail/connect", s.handleGmailConnect)
 		r.Get("/connections/gmail/callback", s.handleGmailCallback)
+		r.Get("/actions", s.handleListActions)
+		r.Post("/actions/{id}/approve", s.handleApproveAction)
+		r.Post("/actions/{id}/reject", s.handleRejectAction)
+		r.Put("/connections/{source}/writes", s.handlePutConnectionWrites)
 		r.Get("/documents", s.handleListDocuments)
 		r.Get("/documents/{id}", s.handleGetDocument)
 		r.Post("/documents/refresh", s.handleRefreshDocuments)

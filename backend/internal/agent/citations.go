@@ -376,7 +376,7 @@ func (o *Orchestrator) generateCitations(
 	injected := []llm.Message{
 		{Role: llm.RoleAssistant, Content: draft},
 		{Role: llm.RoleUser, Content: citationInstruction + "\n\nEVIDENCE\n" +
-			fence("evidence", "", renderEvidence(rows))},
+			fence("evidence", "", "untrusted", renderEvidence(rows))},
 	}
 	state.messages = append(state.messages, injected...)
 

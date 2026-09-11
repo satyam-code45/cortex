@@ -27,7 +27,10 @@ func TestDemoSystemPromptIsByteIdenticalToThePreSplitPrompt(t *testing.T) {
 
 	// And buildSystemPrompt in demo mode renders exactly what the pre-split
 	// buildSystemPrompt(today, toolNames) rendered.
-	got := buildSystemPrompt("2026-08-21", []string{"jira_search_issues", "notion_search"}, Sources{Mode: ModeDemo})
+	// canWrite false: the demo registry holds read tools only, so this is the
+	// prompt every demo run gets, and it must stay byte-identical.
+	got := buildSystemPrompt("2026-08-21", []string{"jira_search_issues", "notion_search"},
+		Sources{Mode: ModeDemo}, false)
 	want := string(golden) + "\n\nToday's date is 2026-08-21." +
 		"\nTools available: jira_search_issues, notion_search."
 	if got != want {
@@ -110,7 +113,7 @@ func TestBuildSystemPromptUserModeCarriesOnlyConnectedSources(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildSystemPrompt("2026-08-21", nil, Sources{Mode: ModeUser, Connected: tt.connected})
+			got := buildSystemPrompt("2026-08-21", nil, Sources{Mode: ModeUser, Connected: tt.connected}, false)
 			for _, part := range tt.wantParts {
 				if !strings.Contains(got, part) {
 					t.Errorf("user-mode prompt lacks %q", part)

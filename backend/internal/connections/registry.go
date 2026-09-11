@@ -38,6 +38,12 @@ type RegistryBuilderConfig struct {
 	NotionBaseURL  string
 	GmailBaseURL   string
 
+	// GmailSendAllowedDomains restricts who a proposed email may be addressed
+	// to. Empty means any domain, which is the default. It is threaded down to
+	// the send tool so an out-of-policy recipient is refused at proposal time,
+	// where it is a correctable observation rather than a wasted approval.
+	GmailSendAllowedDomains []string
+
 	Logger *slog.Logger
 }
 
@@ -96,15 +102,15 @@ func (b *RegistryBuilder) ForUser(ctx context.Context, userID uuid.UUID) (*tools
 			// Already marked; stays out of the registry until reconnected.
 			continue
 		}
-		sourceTools, err := b.buildSource(ctx, userID, info.Source)
+		clients, err := b.buildSource(ctx, userID, info)
 		if err != nil {
 			return nil, agent.Sources{}, err
 		}
-		if sourceTools == nil {
+		if clients == nil {
 			// Permanently broken: marked status=error and dropped.
 			continue
 		}
-		toolset = append(toolset, sourceTools...)
+		toolset = append(toolset, clients.tools()...)
 		connected = append(connected, info.Source)
 	}
 
@@ -120,10 +126,26 @@ func (b *RegistryBuilder) ForUser(ctx context.Context, userID uuid.UUID) (*tools
 	return registry, sources, nil
 }
 
-// buildSource decrypts one connection and constructs its tool set. A nil,
-// nil return means the connection is permanently broken: it has been marked
-// status=error and the source is dropped from this run.
-func (b *RegistryBuilder) buildSource(ctx context.Context, userID uuid.UUID, source string) ([]tools.Tool, error) {
+// buildSource decrypts one connection and constructs its clients.
+//
+// It returns clients rather than tools because two callers need the same
+// construction for different purposes: a run needs the read tools (plus the
+// write tools, when the owner enabled them), and the write execution job needs
+// the executors. Building the clients twice from the same ciphertext would be
+// two chances to diverge on which credential, base URL or scope was used — and
+// the write must go out through exactly the client the proposal was validated
+// against.
+//
+// A nil, nil return means the connection is permanently broken: it has been
+// marked status=error and the source is dropped from this run.
+func (b *RegistryBuilder) buildSource(ctx context.Context, userID uuid.UUID, info Info) (*sourceClients, error) {
+	source := info.Source
+	built := &sourceClients{
+		source:         source,
+		writesEnabled:  info.WritesEnabled,
+		allowedDomains: b.cfg.GmailSendAllowedDomains,
+	}
+
 	switch source {
 	case SourceJira:
 		var creds JiraCredentials
@@ -149,7 +171,8 @@ func (b *RegistryBuilder) buildSource(ctx context.Context, userID uuid.UUID, sou
 		if err != nil {
 			return b.drop(ctx, userID, source, err.Error())
 		}
-		return jira.NewTools(client), nil
+		built.jira = client
+		return built, nil
 
 	case SourceNotion:
 		var creds NotionCredentials
@@ -164,7 +187,8 @@ func (b *RegistryBuilder) buildSource(ctx context.Context, userID uuid.UUID, sou
 		if err != nil {
 			return b.drop(ctx, userID, source, err.Error())
 		}
-		return notion.NewTools(client), nil
+		built.notion = client
+		return built, nil
 
 	case SourceGmail:
 		var creds GmailCredentials
@@ -209,7 +233,23 @@ func (b *RegistryBuilder) buildSource(ctx context.Context, userID uuid.UUID, sou
 		if err != nil {
 			return b.drop(ctx, userID, source, err.Error())
 		}
-		return gmail.NewTools(client), nil
+		built.gmail = client
+		// The sender is read from the stored identity rather than fetched: the
+		// connect callback already resolved and saved the mailbox address, and
+		// it is display copy on the approval card, not a credential. One fewer
+		// round trip on every single run.
+		built.gmailSender = identityEmail(info.Identity)
+		// Writes need the send scope on the token itself. A connection made
+		// before writes were enabled has a readonly-only token, so writes stay
+		// off until the user re-consents — silently registering a send tool
+		// against a token that cannot send would turn an approval into a
+		// failure.
+		if built.writesEnabled && !GmailCanSend(creds) {
+			b.cfg.Logger.Warn("gmail writes are enabled but the stored token has no send scope; "+
+				"the write tool is not registered", "user_id", userID)
+			built.writesEnabled = false
+		}
+		return built, nil
 
 	default:
 		return b.drop(ctx, userID, source, fmt.Sprintf("unknown source %q", source))
@@ -224,7 +264,7 @@ func (b *RegistryBuilder) load(ctx context.Context, userID uuid.UUID, source str
 // handleLoadError classifies a credential load failure: an undecryptable blob
 // is permanent (mark + drop), a connection deleted since the list is a race
 // (drop silently), anything else is transient.
-func (b *RegistryBuilder) handleLoadError(ctx context.Context, userID uuid.UUID, source string, err error) ([]tools.Tool, error) {
+func (b *RegistryBuilder) handleLoadError(ctx context.Context, userID uuid.UUID, source string, err error) (*sourceClients, error) {
 	if errors.Is(err, ErrUnusableCredentials) {
 		return b.drop(ctx, userID, source, "stored credentials could not be decrypted — reconnect the source")
 	}
@@ -238,7 +278,7 @@ func (b *RegistryBuilder) handleLoadError(ctx context.Context, userID uuid.UUID,
 // drop marks a connection permanently broken and removes its source from this
 // run. msg must be safe to show and store — provider wording, never
 // credentials.
-func (b *RegistryBuilder) drop(ctx context.Context, userID uuid.UUID, source, msg string) ([]tools.Tool, error) {
+func (b *RegistryBuilder) drop(ctx context.Context, userID uuid.UUID, source, msg string) (*sourceClients, error) {
 	b.cfg.Logger.Warn("connections: dropping errored source from run",
 		"user_id", userID, "source", source, "reason", msg)
 	if err := b.cfg.Service.MarkError(ctx, userID, source, msg); err != nil {

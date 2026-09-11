@@ -44,6 +44,9 @@ test: migrate-test ## run all backend tests
 check: migrate-test check-web ## full gate: build + vet + test (backend + frontend)
 	cd backend && test -z "$$(gofmt -l .)" || { echo "gofmt needed:"; gofmt -l .; exit 1; }
 	cd backend && go build ./... && go vet ./... && go test ./...
+	# Uncached on purpose: the privacy scrub greps the working tree through git,
+	# which the test cache cannot observe, so a stale pass would hide a fresh leak.
+	cd backend && go test -count=1 ./internal/repohygiene/
 
 check-web: ## frontend gate: typecheck + tests
 	cd frontend && npx tsc --noEmit && npx vitest run

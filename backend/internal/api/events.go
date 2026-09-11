@@ -102,7 +102,22 @@ func (s *Server) handleRunEvents(w http.ResponseWriter, r *http.Request) {
 	// to restart a terminal run. So this stream drains what exists and closes —
 	// without this, a reconnect that had already seen the terminal event
 	// (lastSeq past it) would idle against a finished run until the 5-min cap.
-	runTerminal := run.Status == "completed" || run.Status == "failed"
+	// awaiting_approval counts as settled for streaming purposes, even though the
+	// run is very much not finished. Nothing further will be written to this run
+	// until a person decides, and that can take hours — far longer than
+	// sseMaxStreamAge, and much longer than a connection and a poll loop should
+	// be held open for. So a paused run drains and closes, and the browser keeps
+	// the approval cards on screen and opens a fresh stream once it posts a
+	// decision.
+	//
+	// That reopened stream replays the run from the beginning: Last-Event-ID is
+	// sent by EventSource only on its own automatic reconnect, and a new
+	// EventSource cannot set a header. Harmless — the client already dedupes by
+	// seq, because an automatic reconnect can replay too — and it means a
+	// browser that was closed while a run was paused gets the whole transcript
+	// back when it returns.
+	runSettled := run.Status == "completed" || run.Status == "failed" ||
+		run.Status == agent.RunStatusAwaitingApproval
 
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream")
@@ -142,7 +157,8 @@ func (s *Server) handleRunEvents(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			lastSeq = event.Seq
-			if event.Type == agent.EventRunFinished || event.Type == agent.EventRunFailed {
+			if event.Type == agent.EventRunFinished || event.Type == agent.EventRunFailed ||
+				event.Type == agent.EventRunPaused {
 				flusher.Flush()
 				return
 			}
@@ -150,7 +166,7 @@ func (s *Server) handleRunEvents(w http.ResponseWriter, r *http.Request) {
 		if len(events) > 0 {
 			flusher.Flush()
 		}
-		if runTerminal {
+		if runSettled {
 			return
 		}
 

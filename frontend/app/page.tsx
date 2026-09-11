@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import Link from "next/link";
 
+import { ApprovalQueue } from "@/components/actions/ApprovalQueue";
 import { ConversationList } from "@/components/chat/ConversationList";
 import { MessageInput } from "@/components/chat/MessageInput";
 import { MessageThread } from "@/components/chat/MessageThread";
@@ -192,8 +193,27 @@ export default function Home() {
     [loadTrace],
   );
 
+  // A paused run is not investigating and not finished: it is waiting for a
+  // person. The thinking indicator must stop — an agent that appears to be
+  // working while it is actually blocked on you is the worst of both — and the
+  // input stays disabled, because the run is still going to continue.
   const investigating =
-    sending && stream.status !== "terminal" && stream.answer === null;
+    sending &&
+    stream.status !== "terminal" &&
+    stream.status !== "paused" &&
+    stream.answer === null;
+
+  // Reopening the stream after a decision: the backend closed it on the pause,
+  // and the resumed run's events arrive on a fresh connection.
+  //
+  // Depends on stream.reopen, not stream: useRunStream returns a fresh object
+  // every render, so depending on the whole thing meant this memo never held
+  // and every consumer re-rendered with a new callback identity. reopen itself
+  // is stable.
+  const reopen = stream.reopen;
+  const handleDecided = useCallback(() => {
+    reopen();
+  }, [reopen]);
 
   // BYOK: chat runs on the user's own key, so no key = no input. A disabled
   // box with no explanation reads as a bug; the call-to-action is the state.
@@ -222,6 +242,13 @@ export default function Home() {
           onNeedTrace={loadTrace}
           hasConversation={activeConversationId !== null || sending}
         />
+        {activeRunId && (
+          <ApprovalQueue
+            runId={activeRunId}
+            paused={stream.status === "paused"}
+            onDecided={handleDecided}
+          />
+        )}
         {(sendError ?? loadError) && (
           <p className="border-t px-4 py-2 text-sm text-destructive">
             {sendError ?? loadError}

@@ -46,9 +46,9 @@ const demoInfo = (): ConnectionsInfo => ({
   mode: "demo",
   use_demo_workspace: false,
   sources: {
-    jira: { status: "absent" },
-    notion: { status: "absent" },
-    gmail: { status: "absent" },
+    jira: { status: "absent", writes_enabled: false },
+    notion: { status: "absent", writes_enabled: false },
+    gmail: { status: "absent", writes_enabled: false },
   },
 });
 
@@ -59,14 +59,15 @@ const jiraConnectedInfo = (): ConnectionsInfo => ({
   sources: {
     jira: {
       status: "connected",
+      writes_enabled: false,
       identity: {
         site_url: "https://satyam.atlassian.net",
         account_name: "Satyam Jha",
       },
       updated_at: "2026-08-30T10:00:00Z",
     },
-    notion: { status: "absent" },
-    gmail: { status: "absent" },
+    notion: { status: "absent", writes_enabled: false },
+    gmail: { status: "absent", writes_enabled: false },
   },
 });
 
@@ -76,10 +77,11 @@ const gmailConnectedInfo = (): ConnectionsInfo => ({
   mode: "user",
   use_demo_workspace: false,
   sources: {
-    jira: { status: "absent" },
-    notion: { status: "absent" },
+    jira: { status: "absent", writes_enabled: false },
+    notion: { status: "absent", writes_enabled: false },
     gmail: {
       status: "connected",
+      writes_enabled: false,
       identity: { email: "satyam@gmail.example" },
       updated_at: "2026-08-30T10:00:00Z",
     },
@@ -90,10 +92,11 @@ const gmailErroredInfo = (): ConnectionsInfo => ({
   mode: "user",
   use_demo_workspace: false,
   sources: {
-    jira: { status: "absent" },
-    notion: { status: "absent" },
+    jira: { status: "absent", writes_enabled: false },
+    notion: { status: "absent", writes_enabled: false },
     gmail: {
       status: "error",
+      writes_enabled: false,
       identity: { email: "satyam@gmail.example" },
       last_error: "oauth invalid_grant: Token has been expired or revoked.",
       updated_at: "2026-08-30T10:00:00Z",
@@ -270,6 +273,7 @@ describe("ConnectionsPage paste forms", () => {
     api.getConnections.mockResolvedValueOnce(demoInfo());
     api.putJiraConnection.mockResolvedValue({
       status: "connected",
+      writes_enabled: false,
       identity: {
         site_url: "https://satyam.atlassian.net",
         account_name: "Satyam Jha",

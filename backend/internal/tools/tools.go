@@ -57,8 +57,20 @@ type Result struct {
 	// Content is the observation handed to the model. Compact and plain-text.
 	Content string
 	// Evidence records what the content was derived from, one item per source
-	// document. Every result must populate this.
+	// document. Every result that makes a claim about retrieved data must populate this; a write proposal is the one exception — it carries Proposal instead, because a proposal is not a claim about data and its provenance is the action row.
 	Evidence []EvidenceItem
+	// Proposal is set only by a write tool, and it is set INSTEAD of the write
+	// having happened: the tool validated a request and is asking for it to be
+	// recorded and put to a human. Nil for every read tool, which is why adding
+	// it changed nothing about the read path.
+	//
+	// The agent loop persists it and pauses the run. A tool cannot write the
+	// action row itself — Execute receives no run id, owner or database handle,
+	// by design — and that is also where it belongs: the loop already writes the
+	// tool event, the tool_calls row and the evidence rows in one transaction,
+	// and an action row whose proposal event was lost would make the audit trail
+	// lie.
+	Proposal *Proposal
 }
 
 // EvidenceItem is a single citable source behind a tool result.
@@ -143,6 +155,20 @@ func (r *Registry) Get(name string) (Tool, bool) {
 func (r *Registry) Names() []string {
 	out := make([]string, len(r.names))
 	copy(out, r.names)
+	return out
+}
+
+// WriteNames returns the names of the registered tools that propose writes,
+// sorted. Empty means this run cannot propose a write at all — which is the
+// state of every run whose owner has not explicitly enabled writes, and of
+// every demo-workspace run.
+func (r *Registry) WriteNames() []string {
+	out := make([]string, 0, len(r.names))
+	for _, name := range r.names {
+		if _, ok := r.byName[name].(Proposing); ok {
+			out = append(out, name)
+		}
+	}
 	return out
 }
 

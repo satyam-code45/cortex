@@ -42,14 +42,19 @@ type fakeGoogleGmail struct {
 	// omitRefreshToken scripts Google withholding the refresh token (a
 	// lingering prior grant).
 	omitRefreshToken bool
-	tokenCalls       int
-	profileCalls     int
-	exchangeForms    []url.Values
+	// grantedScope is the scope string Google reports having granted. It
+	// defaults to gmail.readonly and is scripted by the write-escalation tests,
+	// where what matters is what the user actually ticked on the consent screen
+	// rather than what was asked for.
+	grantedScope  string
+	tokenCalls    int
+	profileCalls  int
+	exchangeForms []url.Values
 }
 
 func newFakeGoogleGmail(t *testing.T) *fakeGoogleGmail {
 	t.Helper()
-	f := &fakeGoogleGmail{}
+	f := &fakeGoogleGmail{grantedScope: gmail.ScopeReadonly}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
@@ -59,13 +64,14 @@ func newFakeGoogleGmail(t *testing.T) *fakeGoogleGmail {
 		f.tokenCalls++
 		f.exchangeForms = append(f.exchangeForms, r.PostForm)
 		omit := f.omitRefreshToken
+		granted := f.grantedScope
 		f.mu.Unlock()
 
 		body := map[string]any{
 			"access_token": testGmailAccessToken,
 			"token_type":   "Bearer",
 			"expires_in":   3600,
-			"scope":        gmail.ScopeReadonly,
+			"scope":        granted,
 		}
 		if !omit {
 			body["refresh_token"] = testGmailRefreshToken

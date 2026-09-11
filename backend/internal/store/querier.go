@@ -11,6 +11,29 @@ import (
 )
 
 type Querier interface {
+	// pending -> approved, storing the payload that will actually execute.
+	//
+	// The user_id predicate is the ownership guard. The handler also reads the row
+	// for the caller first, so this is belt and braces today — but the guarantee
+	// "one person cannot decide another person's write" belongs in the statement
+	// that performs the decision, not only in the handler that happens to call it.
+	// A future caller that forgets the pre-read is then a no-op, not a breach.
+	//
+	// The status guard is the concurrency control: two simultaneous approvals both
+	// read a pending row, both issue this UPDATE, and exactly one matches. The
+	// loser gets no rows, which the handler reports as "already decided" instead of
+	// enqueueing a second execution.
+	//
+	// The TTL guard sits in the same predicate rather than in a prior SELECT for the
+	// same reason: checked separately, a row could expire between the check and the
+	// write. $4 is the cutoff timestamp — passed in rather than computed from an
+	// interval here so the configured TTL stays in one place and tests can pin it.
+	ApproveAgentAction(ctx context.Context, arg ApproveAgentActionParams) (AgentAction, error)
+	// approved -> executing. This is the compare-and-set that makes execution
+	// exactly-once: the execution job claims the row before it touches the upstream
+	// API, so a retry of that job — or a duplicate enqueue — finds the row no longer
+	// 'approved', matches nothing, and returns without sending anything.
+	BeginExecutingAgentAction(ctx context.Context, id uuid.UUID) (AgentAction, error)
 	CompleteAgentRun(ctx context.Context, arg CompleteAgentRunParams) (AgentRun, error)
 	// Used to tell "the index is empty" apart from "this query matched nothing",
 	// which are different answers for the agent: the first means stop searching the
@@ -20,6 +43,35 @@ type Querier interface {
 	// Per-source tab counts under the same filters as ListDocuments, so the tabs
 	// and the list never disagree.
 	CountDocumentsFiltered(ctx context.Context, arg CountDocumentsFilteredParams) ([]CountDocumentsFilteredRow, error)
+	// The per-user hourly write limit. Counted on rows that reached (or are
+	// reaching) the upstream system — 'executing' is included deliberately, so a
+	// burst of in-flight writes cannot slip past a count that only sees finished
+	// ones.
+	//
+	// The window is anchored on when the write went OUT, not on when it was
+	// proposed. A proposal may sit pending for the whole ACTION_TTL (24h by
+	// default), so counting by proposed_at would leave the ceiling bypassable:
+	// approve a day's worth of aged proposals and every one of them executes within
+	// a minute while counting as zero against the hour. What the limit exists to
+	// bound is how much mail actually leaves the account, so that is what it counts.
+	//
+	// An 'executing' row has no executed_at yet and falls back to decided_at:
+	// approval is the moment execution is set in motion, which keeps in-flight
+	// writes inside the window without letting a row stuck mid-execution hold the
+	// ceiling down forever.
+	//
+	// sqlc.arg(since) is a timestamp rather than a hardcoded interval so tests can
+	// pin the window, matching the run limit's query.
+	CountExecutedActionsSince(ctx context.Context, arg CountExecutedActionsSinceParams) (int64, error)
+	// How many of the run's actions have not reached a terminal state.
+	//
+	// 'approved' and 'executing' count alongside 'pending', and that is the whole
+	// point of the query. A run resumes only when every proposal is genuinely
+	// finished — counting only 'pending' would let a run resume the instant the last
+	// decision was made, while an approved email was still being sent, and the agent
+	// would report "approved, outcome unknown" instead of "sent, here is the message
+	// id". Waiting the extra second buys a truthful answer.
+	CountUnsettledActionsByRun(ctx context.Context, agentRunID uuid.UUID) (int64, error)
 	// Per-user rate limit: the shared cost of a run is Satyam's upstream
 	// API quotas even when the LLM spend is the user's. $2 is a timestamp rather
 	// than a hardcoded interval so tests can pin the window.
@@ -32,7 +84,32 @@ type Querier interface {
 	DeleteSessionByTokenHash(ctx context.Context, tokenHash []byte) (int64, error)
 	DeleteUserConnection(ctx context.Context, arg DeleteUserConnectionParams) (int64, error)
 	DeleteUserLLMKey(ctx context.Context, userID uuid.UUID) (int64, error)
+	// pending -> expired. An expired proposal can never execute.
+	ExpireAgentAction(ctx context.Context, id uuid.UUID) (AgentAction, error)
+	// executing -> failed. Terminal: the row is not returned to 'approved' for
+	// another attempt, because a failed write may or may not have landed upstream
+	// and re-sending on a guess is the one outcome worse than reporting the failure.
+	FailAgentAction(ctx context.Context, arg FailAgentActionParams) (AgentAction, error)
 	FailAgentRun(ctx context.Context, arg FailAgentRunParams) (AgentRun, error)
+	// executing -> failed, for a write whose worker died mid-attempt.
+	//
+	// Distinct from FailAgentAction only in intent, and worth its own name: this one
+	// records that the outcome is UNKNOWN rather than that the call returned an
+	// error. The write may well have landed upstream, so it must never be retried,
+	// and the person who approved it needs to be told exactly that.
+	FailInterruptedAgentAction(ctx context.Context, arg FailInterruptedAgentActionParams) (AgentAction, error)
+	// executing -> executed, recording what the upstream system returned.
+	FinishAgentAction(ctx context.Context, arg FinishAgentActionParams) (AgentAction, error)
+	// By id alone, for the execution job: it runs on behalf of the row's own owner
+	// rather than a request, so there is no caller identity to check it against.
+	// Every endpoint a user can reach uses GetAgentActionForUser instead.
+	GetAgentAction(ctx context.Context, id uuid.UUID) (AgentAction, error)
+	GetAgentActionByIdempotencyKey(ctx context.Context, idempotencyKey string) (AgentAction, error)
+	// Ownership is enforced in the query, not in Go: the approve and reject
+	// endpoints take a caller-supplied UUID, and this predicate is what stops one
+	// user approving another's pending email.
+	GetAgentActionForUser(ctx context.Context, arg GetAgentActionForUserParams) (AgentAction, error)
+	GetAgentRun(ctx context.Context, id uuid.UUID) (AgentRun, error)
 	// Ownership is enforced in the query, not in Go: GET /api/runs/{id} takes a
 	// caller-supplied UUID, and joining through conversations is what stops it
 	// being an IDOR the moment a second user exists.
@@ -52,6 +129,12 @@ type Querier interface {
 	GetUserConnection(ctx context.Context, arg GetUserConnectionParams) (UserConnection, error)
 	GetUserDemoWorkspace(ctx context.Context, id uuid.UUID) (bool, error)
 	GetUserLLMKey(ctx context.Context, userID uuid.UUID) (UserLlmKey, error)
+	// Records a proposal. ON CONFLICT DO NOTHING on the idempotency key rather than
+	// an upsert: a colliding insert means this exact action was already proposed for
+	// this run — an agent-run job retried after a crash mid-loop re-proposes
+	// identically — and the existing row, which may already have been decided, must
+	// win. No rows returned is the caller's signal to fetch and reuse it.
+	InsertAgentAction(ctx context.Context, arg InsertAgentActionParams) (AgentAction, error)
 	InsertAgentRun(ctx context.Context, arg InsertAgentRunParams) (AgentRun, error)
 	InsertCitation(ctx context.Context, arg InsertCitationParams) (Citation, error)
 	// The embedding arrives as pgvector's text form and is cast in SQL. Passing it
@@ -82,6 +165,9 @@ type Querier interface {
 	// it already recorded, and guessing would collide with the unique
 	// (agent_run_id, seq) constraint.
 	InsertToolCall(ctx context.Context, arg InsertToolCallParams) (ToolCall, error)
+	ListAgentActionsByRun(ctx context.Context, agentRunID uuid.UUID) ([]AgentAction, error)
+	// The audit view: every action across every run, newest first.
+	ListAgentActionsForUser(ctx context.Context, arg ListAgentActionsForUserParams) ([]AgentAction, error)
 	// Joined with evidence because a citation is only meaningful alongside what it
 	// points at: the trace endpoint renders the marker, the claim, and the source's
 	// title and URL together.
@@ -97,7 +183,16 @@ type Querier interface {
 	ListDocuments(ctx context.Context, arg ListDocumentsParams) ([]ListDocumentsRow, error)
 	ListEvalRuns(ctx context.Context) ([]EvalRun, error)
 	ListEvidenceByRun(ctx context.Context, agentRunID uuid.UUID) ([]Evidence, error)
+	// The expiry sweep's input: pending rows past the TTL cutoff ($1).
+	ListExpiredPendingActions(ctx context.Context, arg ListExpiredPendingActionsParams) ([]AgentAction, error)
 	ListMessagesByConversation(ctx context.Context, conversationID uuid.UUID) ([]Message, error)
+	// The liveness backstop: runs paused for a decision that has already been made.
+	//
+	// A run reaches this state only through a bug — the lock above is what prevents
+	// it — but "the investigation never answers and nothing in the system can find
+	// it" is a bad enough outcome to warrant a cheap sweep that cannot be reasoned
+	// wrong. Ordered by id so a batch locks runs in a deterministic order.
+	ListResumableStalledRuns(ctx context.Context, limit int32) ([]uuid.UUID, error)
 	// Ordered by seq, not created_at: two events written inside one transaction can
 	// share a timestamp, and the transcript's order is the thing being replayed.
 	ListRunEventsByRun(ctx context.Context, agentRunID uuid.UUID) ([]RunEvent, error)
@@ -107,6 +202,40 @@ type Querier interface {
 	ListRunEventsByRunAfterSeq(ctx context.Context, arg ListRunEventsByRunAfterSeqParams) ([]RunEvent, error)
 	ListToolCallsByRun(ctx context.Context, agentRunID uuid.UUID) ([]ToolCall, error)
 	ListUserConnections(ctx context.Context, userID uuid.UUID) ([]UserConnection, error)
+	// Serializes the settle-and-resume decision for one run.
+	//
+	// Every path that settles an action asks, in the same transaction, "is anything
+	// on this run still outstanding?" and enqueues the resume only when the answer
+	// is no. Under READ COMMITTED that question is unsafe when two actions on one
+	// run are settled concurrently: each transaction sees its own settlement plus
+	// the OTHER row in its pre-commit state, so both count one outstanding action
+	// and neither enqueues a resume. The run then sits in 'awaiting_approval'
+	// forever — the expiry sweep only looks at 'pending' rows, so nothing would
+	// ever find it again.
+	//
+	// Taking this lock as the first statement of each settling transaction makes
+	// those transactions run one at a time per run, so the second one sees the
+	// first's committed settlement and enqueues exactly one resume. It locks the
+	// run row rather than using an advisory lock so the lock is released by COMMIT
+	// with no separate unlock to leak.
+	LockAgentRunForSettlement(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	// running -> awaiting_approval. The status guard keeps the transition honest for
+	// a run that raced to a terminal state; no rows means there is nothing to pause.
+	//
+	// finished_at stays NULL: the run is not finished, it is waiting. Token totals
+	// are stored so a paused run's cost is visible before it resumes, and because a
+	// resume rebuilds them from the event log rather than from memory.
+	PauseAgentRun(ctx context.Context, arg PauseAgentRunParams) (AgentRun, error)
+	// pending -> rejected. Terminal for the action; the run continues and the agent
+	// is told the reason.
+	RejectAgentAction(ctx context.Context, arg RejectAgentActionParams) (AgentAction, error)
+	// awaiting_approval -> running, claiming a paused run for the resume job.
+	//
+	// 'running' is admitted alongside 'awaiting_approval' for the same reason
+	// StartAgentRun admits it: a resume job retried after its worker was killed
+	// mid-loop must be able to pick the run back up. Anything terminal matches
+	// nothing, so a run that already answered cannot be resumed into a second life.
+	ResumeAgentRun(ctx context.Context, id uuid.UUID) (AgentRun, error)
 	// The join is the point: the vector index finds the chunk, and the
 	// relational half supplies the title, URL and metadata that make it citable.
 	// Doing both in one query is only possible because the vectors live in the same
@@ -117,6 +246,10 @@ type Querier interface {
 	// or the planner silently ignores the index.
 	SearchDocumentChunks(ctx context.Context, arg SearchDocumentChunksParams) ([]SearchDocumentChunksRow, error)
 	SetUserConnectionError(ctx context.Context, arg SetUserConnectionErrorParams) error
+	// Enabling or disabling writes for one source. execrows, not exec: zero rows
+	// means the connection does not exist, which the handler answers with a 404
+	// rather than a silent success.
+	SetUserConnectionWrites(ctx context.Context, arg SetUserConnectionWritesParams) (int64, error)
 	SetUserDemoWorkspace(ctx context.Context, arg SetUserDemoWorkspaceParams) error
 	// Last content change per source (updated_at only moves when content_hash
 	// changes) — distinct from "last refreshed", which comes from River job rows.

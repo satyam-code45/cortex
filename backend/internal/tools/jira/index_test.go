@@ -62,7 +62,7 @@ func crawlJQL(t *testing.T, f *fakeJira, source *jira.Source) string {
 	return searches[0].query.Get("jql")
 }
 
-// TEST-4.A — the crawl's JQL must restrict, not merely sort.
+// The crawl's JQL must restrict, not merely sort.
 func TestIndexCrawlSendsABoundedJQL(t *testing.T) {
 	t.Parallel()
 

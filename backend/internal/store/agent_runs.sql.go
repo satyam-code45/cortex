@@ -115,6 +115,30 @@ func (q *Queries) FailAgentRun(ctx context.Context, arg FailAgentRunParams) (Age
 	return i, err
 }
 
+const getAgentRun = `-- name: GetAgentRun :one
+SELECT id, conversation_id, query, status, model, answer, error, latency_ms, input_tokens, output_tokens, created_at, finished_at FROM agent_runs WHERE id = $1
+`
+
+func (q *Queries) GetAgentRun(ctx context.Context, id uuid.UUID) (AgentRun, error) {
+	row := q.db.QueryRow(ctx, getAgentRun, id)
+	var i AgentRun
+	err := row.Scan(
+		&i.ID,
+		&i.ConversationID,
+		&i.Query,
+		&i.Status,
+		&i.Model,
+		&i.Answer,
+		&i.Error,
+		&i.LatencyMs,
+		&i.InputTokens,
+		&i.OutputTokens,
+		&i.CreatedAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
 const getAgentRunForUser = `-- name: GetAgentRunForUser :one
 SELECT r.id, r.conversation_id, r.query, r.status, r.model, r.answer, r.error, r.latency_ms, r.input_tokens, r.output_tokens, r.created_at, r.finished_at FROM agent_runs r
          JOIN conversations c ON c.id = r.conversation_id
@@ -184,6 +208,147 @@ func (q *Queries) InsertAgentRun(ctx context.Context, arg InsertAgentRunParams) 
 		arg.Status,
 		arg.Model,
 	)
+	var i AgentRun
+	err := row.Scan(
+		&i.ID,
+		&i.ConversationID,
+		&i.Query,
+		&i.Status,
+		&i.Model,
+		&i.Answer,
+		&i.Error,
+		&i.LatencyMs,
+		&i.InputTokens,
+		&i.OutputTokens,
+		&i.CreatedAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
+const listResumableStalledRuns = `-- name: ListResumableStalledRuns :many
+SELECT r.id FROM agent_runs r
+WHERE r.status = 'awaiting_approval'
+  AND NOT EXISTS (
+    SELECT 1 FROM agent_actions a
+    WHERE a.agent_run_id = r.id
+      AND a.status IN ('pending', 'approved', 'executing')
+  )
+ORDER BY r.id
+LIMIT $1
+`
+
+// The liveness backstop: runs paused for a decision that has already been made.
+//
+// A run reaches this state only through a bug — the lock above is what prevents
+// it — but "the investigation never answers and nothing in the system can find
+// it" is a bad enough outcome to warrant a cheap sweep that cannot be reasoned
+// wrong. Ordered by id so a batch locks runs in a deterministic order.
+func (q *Queries) ListResumableStalledRuns(ctx context.Context, limit int32) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listResumableStalledRuns, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockAgentRunForSettlement = `-- name: LockAgentRunForSettlement :one
+SELECT id FROM agent_runs WHERE id = $1 FOR UPDATE
+`
+
+// Serializes the settle-and-resume decision for one run.
+//
+// Every path that settles an action asks, in the same transaction, "is anything
+// on this run still outstanding?" and enqueues the resume only when the answer
+// is no. Under READ COMMITTED that question is unsafe when two actions on one
+// run are settled concurrently: each transaction sees its own settlement plus
+// the OTHER row in its pre-commit state, so both count one outstanding action
+// and neither enqueues a resume. The run then sits in 'awaiting_approval'
+// forever — the expiry sweep only looks at 'pending' rows, so nothing would
+// ever find it again.
+//
+// Taking this lock as the first statement of each settling transaction makes
+// those transactions run one at a time per run, so the second one sees the
+// first's committed settlement and enqueues exactly one resume. It locks the
+// run row rather than using an advisory lock so the lock is released by COMMIT
+// with no separate unlock to leak.
+func (q *Queries) LockAgentRunForSettlement(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, lockAgentRunForSettlement, id)
+	var id_2 uuid.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
+const pauseAgentRun = `-- name: PauseAgentRun :one
+UPDATE agent_runs
+SET status        = 'awaiting_approval',
+    input_tokens  = $2,
+    output_tokens = $3
+WHERE id = $1
+  AND status = 'running'
+RETURNING id, conversation_id, query, status, model, answer, error, latency_ms, input_tokens, output_tokens, created_at, finished_at
+`
+
+type PauseAgentRunParams struct {
+	ID           uuid.UUID `json:"id"`
+	InputTokens  *int32    `json:"input_tokens"`
+	OutputTokens *int32    `json:"output_tokens"`
+}
+
+// running -> awaiting_approval. The status guard keeps the transition honest for
+// a run that raced to a terminal state; no rows means there is nothing to pause.
+//
+// finished_at stays NULL: the run is not finished, it is waiting. Token totals
+// are stored so a paused run's cost is visible before it resumes, and because a
+// resume rebuilds them from the event log rather than from memory.
+func (q *Queries) PauseAgentRun(ctx context.Context, arg PauseAgentRunParams) (AgentRun, error) {
+	row := q.db.QueryRow(ctx, pauseAgentRun, arg.ID, arg.InputTokens, arg.OutputTokens)
+	var i AgentRun
+	err := row.Scan(
+		&i.ID,
+		&i.ConversationID,
+		&i.Query,
+		&i.Status,
+		&i.Model,
+		&i.Answer,
+		&i.Error,
+		&i.LatencyMs,
+		&i.InputTokens,
+		&i.OutputTokens,
+		&i.CreatedAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
+const resumeAgentRun = `-- name: ResumeAgentRun :one
+UPDATE agent_runs
+SET status = 'running'
+WHERE id = $1
+  AND status IN ('awaiting_approval', 'running')
+RETURNING id, conversation_id, query, status, model, answer, error, latency_ms, input_tokens, output_tokens, created_at, finished_at
+`
+
+// awaiting_approval -> running, claiming a paused run for the resume job.
+//
+// 'running' is admitted alongside 'awaiting_approval' for the same reason
+// StartAgentRun admits it: a resume job retried after its worker was killed
+// mid-loop must be able to pick the run back up. Anything terminal matches
+// nothing, so a run that already answered cannot be resumed into a second life.
+func (q *Queries) ResumeAgentRun(ctx context.Context, id uuid.UUID) (AgentRun, error) {
+	row := q.db.QueryRow(ctx, resumeAgentRun, id)
 	var i AgentRun
 	err := row.Scan(
 		&i.ID,

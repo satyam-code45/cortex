@@ -45,6 +45,15 @@ const (
 	// requested by cmd/gmail-auth because the token is shared, but nothing on
 	// the agent path uses it.
 	ScopeInsert = "https://www.googleapis.com/auth/gmail.insert"
+	// ScopeSend lets Cortex send mail as the account. It is requested ONLY when
+	// a user explicitly enables writes for their Gmail connection — never
+	// bundled into the read connection — so a user who never enabled writes has
+	// no token that could send anything, whatever the rest of the system does.
+	//
+	// Google classes this as a restricted scope, the same tier as reading mail:
+	// a published app needs Google's review and possibly a security assessment
+	// before it may ask the public for it. Test users are unaffected.
+	ScopeSend = "https://www.googleapis.com/auth/gmail.send"
 	// ScopeLabels lets the seeder create the fixture label. EnsureLabel needs
 	// it; without this scope label creation fails with a 403.
 	ScopeLabels = "https://www.googleapis.com/auth/gmail.labels"
