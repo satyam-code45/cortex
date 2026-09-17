@@ -134,7 +134,11 @@ func (b *RegistryBuilder) WritersForUser(ctx context.Context, userID uuid.UUID) 
 	if err != nil {
 		return nil, err
 	}
-	if Mode(len(infos), useDemo) == agent.ModeDemo {
+	// Same authority as ForUser: the builder's demo registry IS whether this
+	// deployment has a demo workspace. Asking the service instead would be a
+	// second source of truth for one fact, and the two disagreeing is a user
+	// who reads as demo mode on one path and user mode on the other.
+	if Mode(len(infos), useDemo, b.cfg.Demo != nil) == agent.ModeDemo {
 		return actions.NewRegistry()
 	}
 
@@ -192,10 +196,11 @@ func (b *RegistryBuilder) CheckWriteReadiness(ctx context.Context, userID uuid.U
 			return fmt.Errorf("%w: %s", ErrWritesUnavailable, err)
 		}
 		client, err := jira.NewClient(jira.Config{
-			BaseURL:  baseURL,
-			Email:    creds.Email,
-			APIToken: creds.APIToken,
-			Logger:   b.cfg.Logger,
+			BaseURL:       baseURL,
+			Email:         creds.Email,
+			APIToken:      creds.APIToken,
+			AllowUnscoped: true, // the user's own site; writes never touch the demo workspace
+			Logger:        b.cfg.Logger,
 		})
 		if err != nil {
 			return fmt.Errorf("%w: %s", ErrWritesUnavailable, err)

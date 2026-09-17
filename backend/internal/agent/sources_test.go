@@ -251,6 +251,51 @@ func TestRunWithNoUsableSourcesFailsAndNeverBorrowsDemoData(t *testing.T) {
 	}
 }
 
+// A run whose owner has nothing connected at all fails terminally with the
+// connect pointer.
+//
+// The chat handler refuses this case up front, so reaching the loop means the
+// owner disconnected their last source between pressing Send and the worker
+// picking the job up. The distinction that matters is permanent-vs-transient:
+// classified as transient, the error would be handed back to River and the run
+// row would sit unclaimed with no terminal state — retried to exhaustion while
+// the browser waits on an event stream for an answer that cannot arrive.
+func TestRunWithNoSourcesConnectedFailsTerminallyRatherThanRetrying(t *testing.T) {
+	pool := testPool(t)
+	seeded := seedRun(t, pool, "what changed this week?")
+
+	demoTool := &fakeTool{name: "search_knowledge_base"}
+	provider := newFakeProvider(t) // any call is an unscripted-call failure
+	o := newSourcesOrchestrator(t, pool, provider, newRegistry(t, demoTool),
+		func(_ context.Context, _ uuid.UUID) (*tools.Registry, agent.Sources, error) {
+			// Exactly what connections.ErrNoSourcesConnected wraps.
+			return nil, agent.Sources{}, fmt.Errorf("connections: no sources connected: %w", agent.ErrNoSources)
+		})
+
+	if err := o.Run(context.Background(), seeded.runID); err != nil {
+		t.Fatalf("Run: %v (no sources is a failed run, not a job error to retry)", err)
+	}
+
+	run := loadRun(t, pool, seeded.runID)
+	if run.status != "failed" {
+		t.Fatalf("run status = %q, want failed", run.status)
+	}
+	if !run.finished {
+		t.Error("run has no finished_at; a failed run must be terminal or the UI waits forever")
+	}
+	// The reason must tell the reader to connect something, not to reconnect
+	// something they do not have.
+	if run.errText == nil || !strings.Contains(*run.errText, "connect a source") {
+		t.Errorf("run error = %v, want it to point at connecting a source", run.errText)
+	}
+	if provider.callCount() != 0 {
+		t.Errorf("the provider took %d calls, want 0", provider.callCount())
+	}
+	if demoTool.executions() != 0 {
+		t.Errorf("a demo tool ran %d time(s), want 0 — demo data must never stand in", demoTool.executions())
+	}
+}
+
 // A transient resolver failure (database blip while loading connections) is a
 // job error for River, not a permanently failed run.
 func TestRunWithATransientRegistryErrorIsRetriedNotFailed(t *testing.T) {

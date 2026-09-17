@@ -16,6 +16,21 @@ import (
 	"cortex/internal/tools/notion"
 )
 
+// ErrNoSourcesConnected means the run owner has nothing to search: no
+// connections, and either no demo workspace or the demo not asked for.
+//
+// Distinct from agent.ErrNoUsableSources, which means the user *has* sources
+// but every one of them is broken. That is a run that should start and fail
+// visibly with a trace; this is a run that should never start at all, and the
+// chat handler turns it into a 409 that routes the user to Connections.
+//
+// It wraps agent.ErrNoSources so that a run which reaches the loop anyway —
+// the owner disconnected their last source between enqueue and execution —
+// is recognized there as permanent and failed with a reason, rather than
+// classified as a transient fault and retried until River gives up while the
+// run row never reaches a terminal state.
+var ErrNoSourcesConnected = fmt.Errorf("connections: no sources connected: %w", agent.ErrNoSources)
+
 // RegistryBuilderConfig configures a RegistryBuilder.
 type RegistryBuilderConfig struct {
 	// Service reads and marks the user's stored connections.
@@ -59,9 +74,10 @@ func NewRegistryBuilder(cfg RegistryBuilderConfig) (*RegistryBuilder, error) {
 	if cfg.Service == nil {
 		return nil, errors.New("connections: Service is required")
 	}
-	if cfg.Demo == nil {
-		return nil, errors.New("connections: Demo registry is required")
-	}
+	// A nil demo registry is legal: it means the deployment has no demo
+	// workspace, so demo mode is simply unreachable and every user answers from
+	// their own connected sources. It used to be rejected here, which is what
+	// made a demo-less server unbuildable.
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
@@ -91,8 +107,17 @@ func (b *RegistryBuilder) ForUser(ctx context.Context, userID uuid.UUID) (*tools
 	if err != nil {
 		return nil, agent.Sources{}, err
 	}
-	if Mode(len(infos), useDemo) == agent.ModeDemo {
+	// A nil demo registry IS this deployment having no demo workspace, so it is
+	// the authority Mode is given — one fact, read from the thing that would
+	// have to serve the request.
+	switch Mode(len(infos), useDemo, b.cfg.Demo != nil) {
+	case agent.ModeDemo:
 		return b.cfg.Demo, agent.Sources{Mode: agent.ModeDemo}, nil
+	case ModeNone:
+		// Nothing connected and the demo not asked for. This is a new account,
+		// not a failure: the caller turns it into the 409 that routes the user
+		// to Connections, and no run row is created.
+		return nil, agent.Sources{}, ErrNoSourcesConnected
 	}
 
 	var toolset []tools.Tool
@@ -166,7 +191,11 @@ func (b *RegistryBuilder) buildSource(ctx context.Context, userID uuid.UUID, inf
 			BaseURL:  baseURL,
 			Email:    creds.Email,
 			APIToken: creds.APIToken,
-			Logger:   b.cfg.Logger,
+			// A user's own site, reached with their own token: theirs to search
+			// in full. The pin exists to confine the shared demo workspace, and
+			// applying it here would silently hide their own projects.
+			AllowUnscoped: true,
+			Logger:        b.cfg.Logger,
 		})
 		if err != nil {
 			return b.drop(ctx, userID, source, err.Error())

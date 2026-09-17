@@ -152,8 +152,15 @@ func saveGmail(t *testing.T, svc *connections.Service, userID uuid.UUID, refresh
 
 func TestForUserWithZeroConnectionsGetsTheFullDemoRegistry(t *testing.T) {
 	pool := testPool(t)
-	builder, _ := newBuilder(t, pool, nil)
+	builder, svc := newBuilder(t, pool, nil)
 	userID := insertUser(t, pool)
+
+	// Demo mode is entered on purpose. Zero connections alone used to mean
+	// demo, which handed every new account the deployment owner's real data by
+	// default; now the user asks for it.
+	if err := svc.SetUseDemo(context.Background(), userID, true); err != nil {
+		t.Fatalf("SetUseDemo: %v", err)
+	}
 
 	registry, sources, err := builder.ForUser(context.Background(), userID)
 	if err != nil {
@@ -381,13 +388,10 @@ func TestForUserNeverSeesAnotherUsersConnections(t *testing.T) {
 		t.Errorf("B's registry = %v, want only the notion set %v (never A's jira)", got, notionToolNames)
 	}
 
-	// C, with nothing connected, stays on the demo workspace.
-	_, sourcesC, err := builder.ForUser(context.Background(), userC)
-	if err != nil {
-		t.Fatalf("ForUser(C): %v", err)
-	}
-	if sourcesC.Mode != agent.ModeDemo {
-		t.Errorf("C's mode = %q, want demo", sourcesC.Mode)
+	// C has connected nothing and has not asked for the demo, so C has nothing
+	// to search — and in particular does not inherit A's or B's sources.
+	if _, _, err := builder.ForUser(context.Background(), userC); !errors.Is(err, connections.ErrNoSourcesConnected) {
+		t.Errorf("ForUser(C) error = %v, want ErrNoSourcesConnected", err)
 	}
 
 	// A's registry really is A's.

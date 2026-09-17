@@ -218,11 +218,17 @@ func New(cfg Config) (*Orchestrator, error) {
 	if cfg.DB == nil {
 		return nil, errors.New("agent: DB is required")
 	}
-	if cfg.Provider == nil {
-		return nil, errors.New("agent: Provider is required")
+	// Provider and Registry are the fallbacks used when the corresponding
+	// per-user factory is absent, so what must exist is one of each pair, not
+	// both members of it. Demanding the fallback unconditionally made two
+	// supported deployments unconstructable: a BYOK server has no server-wide
+	// provider to offer, and a server with no demo workspace has no server-wide
+	// registry to build.
+	if cfg.Provider == nil && cfg.ProviderForUser == nil {
+		return nil, errors.New("agent: one of Provider or ProviderForUser is required")
 	}
-	if cfg.Registry == nil {
-		return nil, errors.New("agent: Registry is required")
+	if cfg.Registry == nil && cfg.RegistryForUser == nil {
+		return nil, errors.New("agent: one of Registry or RegistryForUser is required")
 	}
 	if cfg.Model == "" {
 		return nil, errors.New("agent: Model is required")
@@ -452,18 +458,37 @@ func (o *Orchestrator) resolveEnvironment(ctx context.Context, runID uuid.UUID) 
 		return runEnvironment{}, false, fmt.Errorf("resolve owner for run %s: %w", runID, err)
 	}
 
-	// Resolve the run's tool registry from the owner's connections. A
-	// permanent failure (every connection errored — ErrNoUsableSources) still
-	// claims the run below and fails it honestly: the factory has already
-	// marked the broken connections, and demo data must never stand in for a
-	// user's real sources. Any other error is transient (a database blip, a
-	// provider hiccup during the eager credential check) and goes back to
-	// River for a retry.
+	// Resolve the run's tool registry from the owner's connections. The two
+	// permanent failures — every connection errored (ErrNoUsableSources), or
+	// nothing connected at all (ErrNoSources) — still claim the run below and
+	// fail it honestly: the factory has already marked the broken connections,
+	// and demo data must never stand in for a user's real sources. Any other
+	// error is transient (a database blip, a provider hiccup during the eager
+	// credential check) and goes back to River for a retry.
+	//
+	// Getting that classification wrong in the permanent direction is costly:
+	// an error returned here is never recorded against the run, so the row
+	// stays unclaimed with no terminal state while River retries to exhaustion
+	// and the browser's event stream waits for an answer that cannot come.
 	env := runEnvironment{ownerID: ownerID, registry: o.registry, sources: Sources{Mode: ModeDemo}}
 	if o.registryForUser != nil {
 		reg, src, err := o.registryForUser(ctx, ownerID)
-		if err != nil && !errors.Is(err, ErrNoUsableSources) {
+		if err != nil && !errors.Is(err, ErrNoUsableSources) && !errors.Is(err, ErrNoSources) {
 			return runEnvironment{}, false, fmt.Errorf("resolve tool registry for run %s: %w", runID, err)
+		}
+		// A permanent failure can come back with no registry at all —
+		// connections.ForUser returns nil alongside ErrNoSourcesConnected,
+		// because there was nothing to build one from. The run is claimed and
+		// failed a moment later, but it records an honest run_started first,
+		// and that reads the tool list off the registry. An empty one is the
+		// truthful answer to "what tools did this run have"; a nil one is a
+		// panic in the worker.
+		if reg == nil {
+			empty, regErr := tools.NewRegistry()
+			if regErr != nil {
+				return runEnvironment{}, false, fmt.Errorf("build empty registry for run %s: %w", runID, regErr)
+			}
+			reg = empty
 		}
 		env.registry, env.sources, env.noSourcesErr = reg, src, err
 	}
@@ -480,8 +505,15 @@ func (o *Orchestrator) drive(ctx context.Context, state *runState, noSourcesErr 
 	runID := state.runID
 
 	if noSourcesErr != nil {
+		// The two cases need different sentences, because they ask the reader
+		// to do different things: one has connections that stopped working,
+		// the other has none.
+		reason := "your connected sources need attention — reconnect them on the Connections page"
+		if errors.Is(noSourcesErr, ErrNoSources) {
+			reason = "this question had no sources to search — connect a source on the Connections page, or switch on the demo workspace"
+		}
 		o.logger.Error("agent: run has no usable sources", "run_id", runID, "error", noSourcesErr)
-		if failErr := o.fail(ctx, state, "your connected sources need attention — reconnect them on the Connections page"); failErr != nil {
+		if failErr := o.fail(ctx, state, reason); failErr != nil {
 			return fmt.Errorf("record failed run %s: %w", runID, failErr)
 		}
 		return nil
@@ -558,6 +590,22 @@ var ErrLLMKeyUnavailable = errors.New("agent: llm key unavailable")
 // reconnect — so the orchestrator fails the run with a safe reason instead of
 // letting River retry it.
 var ErrNoUsableSources = errors.New("agent: no usable sources")
+
+// ErrNoSources marks a RegistryForUser result for an owner who has nothing
+// connected at all and has not opted into a demo workspace — so there is no
+// registry to build rather than a broken one.
+//
+// It is distinct from ErrNoUsableSources because the remedy differs: that one
+// means "reconnect what you have", this one means "connect something". Both are
+// permanent for the life of the job, which is what matters to the loop: the
+// chat handler already refuses this case up front, so reaching it here means
+// the owner disconnected their last source between enqueue and execution, and
+// no amount of retrying will reconnect it.
+//
+// connections.ErrNoSourcesConnected wraps this. The dependency runs that way —
+// connections imports agent — so the sentinel has to live here for the
+// orchestrator to recognize it without an import cycle.
+var ErrNoSources = errors.New("agent: no sources connected")
 
 // providerError marks an error as having come from the LLM provider, so it is
 // classified through llm.SafeErrorMessage (which strips the request URL and the

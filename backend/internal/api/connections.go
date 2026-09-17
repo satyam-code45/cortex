@@ -37,9 +37,28 @@ type sourceStatus struct {
 
 // connectionsResponse is the GET /api/connections body.
 type connectionsResponse struct {
-	Mode             string                  `json:"mode"` // "demo" | "user"
+	Mode             string                  `json:"mode"` // "demo" | "user" | "none"
 	UseDemoWorkspace bool                    `json:"use_demo_workspace"`
 	Sources          map[string]sourceStatus `json:"sources"`
+	// DemoAvailable reports whether this deployment has a demo workspace at
+	// all. The frontend offers the "Try the demo workspace" card only when it
+	// does — a deployment without one must not advertise a mode it cannot
+	// enter.
+	DemoAvailable bool `json:"demo_available"`
+	// DemoSources names the sources the demo workspace covers, so the card can
+	// say what trying it would actually show.
+	DemoSources []string `json:"demo_sources,omitempty"`
+	// IndexingAvailable reports whether this deployment has an indexed corpus:
+	// the Sources view and its refresh are features of that, and the frontend
+	// hides them when there is none.
+	//
+	// Deliberately not the same question as DemoAvailable, though it is easy to
+	// assume so. Indexing needs BOTH a demo workspace to crawl AND the server's
+	// own OpenAI key to embed it with, so a demo configured without that key
+	// has demo_available true and indexing_available false — and gating the nav
+	// on the wrong one of the two puts a Sources tab in front of a user whose
+	// every refresh would answer 503.
+	IndexingAvailable bool `json:"indexing_available"`
 }
 
 // jiraIdentity is the display-facts blob stored for a jira connection.
@@ -77,8 +96,11 @@ func (s *Server) handleGetConnections(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := connectionsResponse{
-		Mode:             connections.Mode(len(infos), useDemo),
-		UseDemoWorkspace: useDemo,
+		Mode:              connections.Mode(len(infos), useDemo, s.deps.Connections.DemoAvailable()),
+		UseDemoWorkspace:  useDemo,
+		DemoAvailable:     s.deps.Connections.DemoAvailable(),
+		DemoSources:       s.deps.Connections.DemoSources(),
+		IndexingAvailable: len(s.deps.IndexSources) > 0,
 		Sources: map[string]sourceStatus{
 			connections.SourceJira:   {Status: "absent"},
 			connections.SourceNotion: {Status: "absent"},
@@ -145,10 +167,11 @@ func (s *Server) handlePutJiraConnection(w http.ResponseWriter, r *http.Request)
 	}
 
 	client, err := jira.NewClient(jira.Config{
-		BaseURL:  req.BaseURL,
-		Email:    req.Email,
-		APIToken: req.APIToken,
-		Logger:   logger,
+		BaseURL:       req.BaseURL,
+		Email:         req.Email,
+		APIToken:      req.APIToken,
+		AllowUnscoped: true, // validating the user's own credential against their own site
+		Logger:        logger,
 	})
 	if err != nil {
 		writeError(w, logger, http.StatusUnprocessableEntity, err.Error())
@@ -292,6 +315,17 @@ func (s *Server) handlePutConnectionsMode(w http.ResponseWriter, r *http.Request
 	var req putConnectionsModeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, logger, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	// Switching the toggle ON needs something to switch on to. The UI only
+	// renders the control when a demo exists, so this refuses a request the
+	// product cannot produce — but it is the API that decides, and a stored
+	// true on a deployment with no demo is exactly the stale row that used to
+	// leave a user unable to chat and unable to see the control that would fix
+	// it. Switching OFF is always allowed: withdrawing is never blocked.
+	if req.UseDemoWorkspace && !s.deps.Connections.DemoAvailable() {
+		writeError(w, logger, http.StatusConflict,
+			"this deployment has no demo workspace — connect your own source instead")
 		return
 	}
 	if err := s.deps.Connections.SetUseDemo(r.Context(), user.ID, req.UseDemoWorkspace); err != nil {

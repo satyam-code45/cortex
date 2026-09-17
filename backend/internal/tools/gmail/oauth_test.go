@@ -290,7 +290,7 @@ func TestTokenSourceKeepsRefreshTokenWhenGoogleOmitsIt(t *testing.T) {
 		t.Fatalf("AccessToken: %v", err)
 	}
 
-	stored, err := gmail.LoadToken(path)
+	stored, err := gmail.LoadToken(path, "")
 	if err != nil {
 		t.Fatalf("LoadToken after refresh: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestTokenSourceAdoptsRotatedRefreshToken(t *testing.T) {
 		t.Fatalf("AccessToken: %v", err)
 	}
 
-	stored, err := gmail.LoadToken(path)
+	stored, err := gmail.LoadToken(path, "")
 	if err != nil {
 		t.Fatalf("LoadToken after refresh: %v", err)
 	}
@@ -433,7 +433,7 @@ func TestSaveTokenIsOwnerOnly(t *testing.T) {
 		t.Errorf("token file mode = %04o, want 0600 (it holds a long-lived mailbox credential)", perm)
 	}
 
-	loaded, err := gmail.LoadToken(path)
+	loaded, err := gmail.LoadToken(path, "")
 	if err != nil {
 		t.Fatalf("LoadToken: %v", err)
 	}
@@ -471,7 +471,7 @@ func TestSaveTokenNarrowsAnExistingFile(t *testing.T) {
 func TestLoadTokenMissingFileNamesTheAuthCommand(t *testing.T) {
 	path := filepath.Join(t.TempDir(), gmail.DefaultTokenPath)
 
-	_, err := gmail.LoadToken(path)
+	_, err := gmail.LoadToken(path, "")
 	if err == nil {
 		t.Fatal("LoadToken on a missing file returned no error")
 	}
@@ -491,7 +491,7 @@ func TestLoadTokenRejectsFileWithoutRefreshToken(t *testing.T) {
 		t.Fatalf("write token file: %v", err)
 	}
 
-	if _, err := gmail.LoadToken(path); err == nil {
+	if _, err := gmail.LoadToken(path, ""); err == nil {
 		t.Error("LoadToken on a file with no refresh token returned no error")
 	}
 }
@@ -697,5 +697,129 @@ func TestSaveTokenPersistsExactly(t *testing.T) {
 	}
 	if decoded["refresh_token"] != testRefreshToken {
 		t.Errorf("refresh_token = %v, want %q", decoded["refresh_token"], testRefreshToken)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// the token as an environment variable
+
+// The demo mailbox's refresh token is written by an interactive flow — `make
+// gmail-auth` opens a browser — which cannot run inside a container, while the
+// hosts this deploys to may discard the filesystem on every deploy. The
+// operator pastes the same JSON into GMAIL_TOKEN_JSON instead.
+//
+// Precedence is file-then-environment, deliberately: a developer's local
+// re-authorization must take effect without anyone editing the environment.
+
+const (
+	envRefreshToken  = "1//env-pasted-refresh-token"
+	fileRefreshToken = "1//file-cached-refresh-token"
+)
+
+func TestLoadTokenFallsBackToTheEnvironmentValue(t *testing.T) {
+	tests := []struct {
+		name string
+		// fileContents is written to the token path; empty means no file at
+		// all, which is the deployed case.
+		fileContents string
+		fallbackJSON string
+
+		wantRefreshToken string
+		wantErrContains  []string
+	}{
+		{
+			// The deployed case: nothing on disk, the token in the
+			// environment.
+			name:             "no file, a valid GMAIL_TOKEN_JSON",
+			fallbackJSON:     `{"refresh_token":"` + envRefreshToken + `","token_type":"Bearer"}`,
+			wantRefreshToken: envRefreshToken,
+		},
+		{
+			// The workstation case: `make gmail-auth` just wrote a fresh
+			// token, and it wins over whatever is in the environment.
+			name:             "the file wins when both are present",
+			fileContents:     `{"refresh_token":"` + fileRefreshToken + `"}`,
+			fallbackJSON:     `{"refresh_token":"` + envRefreshToken + `"}`,
+			wantRefreshToken: fileRefreshToken,
+		},
+		{
+			// A truncated paste must say which variable to fix, not report an
+			// anonymous parse failure that looks like a corrupt file.
+			name:            "a malformed GMAIL_TOKEN_JSON names the variable",
+			fallbackJSON:    `{"refresh_token": "oops`,
+			wantErrContains: []string{"GMAIL_TOKEN_JSON"},
+		},
+		{
+			// Valid JSON carrying no refresh token is worse than none: it
+			// would authorize for an hour and then fail with no way to renew.
+			name:            "GMAIL_TOKEN_JSON without a refresh token names the variable",
+			fallbackJSON:    `{"access_token":"ya29.only"}`,
+			wantErrContains: []string{"GMAIL_TOKEN_JSON", "refresh token"},
+		},
+		{
+			// Neither source: the error has to name both ways in, because
+			// which one applies depends on where this is running.
+			name:            "neither a file nor GMAIL_TOKEN_JSON names both ways in",
+			wantErrContains: []string{"gmail-auth", "GMAIL_TOKEN_JSON"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), ".gmail-token.json")
+			if tt.fileContents != "" {
+				if err := os.WriteFile(path, []byte(tt.fileContents), 0o600); err != nil {
+					t.Fatalf("write token file: %v", err)
+				}
+			}
+
+			token, err := gmail.LoadToken(path, tt.fallbackJSON)
+
+			if len(tt.wantErrContains) > 0 {
+				if err == nil {
+					t.Fatalf("LoadToken = %+v, want an error", token)
+				}
+				for _, want := range tt.wantErrContains {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error %q does not mention %q", err, want)
+					}
+				}
+				// An error message about a token must never carry the token.
+				if strings.Contains(err.Error(), envRefreshToken) {
+					t.Errorf("error %q carries the refresh token", err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("LoadToken error = %v, want nil", err)
+			}
+			if token.RefreshToken != tt.wantRefreshToken {
+				t.Errorf("refresh token = %q, want %q", token.RefreshToken, tt.wantRefreshToken)
+			}
+		})
+	}
+}
+
+// The environment value is specified to be read when the token path is absent
+// OR UNREADABLE. A read-only secret mount that the process cannot open, or a
+// path that names something other than a readable file, is the case this
+// covers: the durable value in the environment must still get the demo mailbox
+// authenticated rather than the boot failing with an unusable file.
+func TestLoadTokenFallsBackWhenTheFileIsUnreadable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: an unreadable file is still readable, so the case cannot be staged")
+	}
+	path := filepath.Join(t.TempDir(), ".gmail-token.json")
+	if err := os.WriteFile(path, []byte(`{"refresh_token":"`+fileRefreshToken+`"}`), 0o000); err != nil {
+		t.Fatalf("write an unreadable token file: %v", err)
+	}
+
+	token, err := gmail.LoadToken(path, `{"refresh_token":"`+envRefreshToken+`"}`)
+	if err != nil {
+		t.Fatalf("LoadToken over an unreadable file = %v, want the GMAIL_TOKEN_JSON value", err)
+	}
+	if token.RefreshToken != envRefreshToken {
+		t.Errorf("refresh token = %q, want the environment's %q", token.RefreshToken, envRefreshToken)
 	}
 }

@@ -90,13 +90,49 @@ type Info struct {
 // handles either ciphertext or short-lived plaintext; nothing else touches
 // the cipher.
 type Service struct {
-	db     store.DBTX
-	cipher *keys.Cipher
+	db          store.DBTX
+	cipher      *keys.Cipher
+	demoSources []string
 }
 
 // NewService builds a Service.
-func NewService(db store.DBTX, cipher *keys.Cipher) *Service {
-	return &Service{db: db, cipher: cipher}
+//
+// demoSources names the demo sources this deployment offers, empty when it has
+// none. The service holds it because "can this user run anything?" and "should
+// the demo card be offered?" are both questions about a user *and* the
+// deployment, and answering them in one place keeps the API and the registry
+// builder from drifting apart on what demo mode means.
+func NewService(db store.DBTX, cipher *keys.Cipher, demoSources ...string) *Service {
+	return &Service{db: db, cipher: cipher, demoSources: demoSources}
+}
+
+// DemoAvailable reports whether this deployment has a demo workspace to offer.
+func (s *Service) DemoAvailable() bool { return len(s.demoSources) > 0 }
+
+// DemoSources names the demo sources on offer, empty when there is no demo
+// workspace.
+func (s *Service) DemoSources() []string { return s.demoSources }
+
+// HasSources reports whether this user's runs would have anything to search:
+// any connection of their own, or the demo workspace when they have asked for
+// it and this deployment has one.
+//
+// The chat handler calls it before creating anything, so a user with nothing
+// connected gets a 409 that routes them to Connections rather than a run row
+// that exists only to fail.
+func (s *Service) HasSources(ctx context.Context, userID uuid.UUID) (bool, error) {
+	infos, err := s.List(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	useDemo, err := s.UseDemo(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	// Mode already accounts for a toggle with no demo behind it, so there is
+	// no special case here: anything other than "no sources" has something to
+	// search.
+	return Mode(len(infos), useDemo, s.DemoAvailable()) != ModeNone, nil
 }
 
 // Save encrypts and stores a user's credentials for one source, replacing any
@@ -306,13 +342,49 @@ func ValidateJiraBaseURL(raw string) (string, error) {
 	return trimmed, nil
 }
 
-// Mode decides which workspace a user's runs see: agent.ModeDemo with zero
-// connections or the demo toggle on, agent.ModeUser otherwise. All-or-nothing
-// by design — an errored connection still counts as a connection, so a broken
-// credential never silently swaps real sources for demo data.
-func Mode(connectionCount int, useDemo bool) string {
-	if connectionCount == 0 || useDemo {
+// ModeNone is the mode of an account that has connected nothing and has not
+// asked for the demo workspace: there are no sources to search, so no run can
+// start.
+//
+// It lives here rather than beside agent.ModeDemo/ModeUser because it is a
+// state of an *account*, not of a run — a run in this state never reaches
+// run_started, so agent.Sources never carries it and the SSE/trace contract is
+// unchanged.
+const ModeNone = "none"
+
+// Mode decides which workspace a user's runs see: agent.ModeUser once anything
+// is connected, agent.ModeDemo when the demo workspace is explicitly asked for,
+// and ModeNone otherwise.
+//
+// Zero connections used to mean demo. That made someone else's data the default
+// identity of every new account: signing in was enough to search the operator's
+// real mailbox and Jira. The demo workspace is now somewhere a user chooses to
+// go — useDemo is set by the "Use demo workspace" toggle — and an account that
+// never chooses it never touches it.
+//
+// User mode stays all-or-nothing: an errored connection still counts as a
+// connection, so a broken credential never silently swaps real sources for demo
+// data.
+// demoAvailable is a parameter rather than something each caller re-derives,
+// because there are five callers and a disagreement between any two of them is
+// a user who can see one answer in the UI and get another from the API. In
+// particular the toggle is a stored row that outlives the configuration that
+// justified it: an operator who removes the demo credentials leaves every user
+// who had opted in with use_demo_workspace still true. Treating that stale
+// flag as demo mode would route those users — including ones with their own
+// Jira connected — to a workspace that no longer exists, and the UI hides the
+// toggle when there is no demo, so they could not turn it off again. So a
+// toggle with nothing behind it is inert, and their own sources decide.
+func Mode(connectionCount int, useDemo, demoAvailable bool) string {
+	switch {
+	case useDemo && demoAvailable:
+		// The toggle wins over connections, unchanged from when it was
+		// introduced: a user with sources connected can still ask to see the
+		// demo workspace.
 		return agent.ModeDemo
+	case connectionCount > 0:
+		return agent.ModeUser
+	default:
+		return ModeNone
 	}
-	return agent.ModeUser
 }

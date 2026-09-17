@@ -47,25 +47,47 @@ services:
         sync: false
 
       # --- model ---------------------------------------------------------
+      # Optional. Funds the server's own embedding work — the indexing crawl
+      # and the knowledge-base query embedder — and nothing else: every
+      # investigation runs on its owner's own key. Leave it blank and indexing
+      # is disabled with a line in the startup log; the rest of the product,
+      # including the demo's live source tools, works unchanged.
       - key: OPENAI_API_KEY
         sync: false
 
-      # --- sources (all required: the agent refuses to start without them,
-      # because a server missing one answers multi-hop questions badly
-      # rather than not at all) --------------------------------------------
+      # --- DEMO WORKSPACE (every variable below is OPTIONAL) --------------
+      # These configure the demo workspace: a read-only showcase users opt
+      # into from the Connections page. Leave them all blank and this
+      # deployment is bring-your-own-sources — each user connects their own
+      # Jira, Notion and Gmail, and a new account connects one before it can
+      # ask anything.
+      #
+      # A source must be configured WHOLE or not at all: a half-filled one
+      # fails at startup naming the missing field. And think before enabling a
+      # demo on a public deployment — anyone who can sign in can query it, so
+      # set AUTH_ALLOWED_EMAILS below.
       - key: JIRA_BASE_URL
         sync: false
       - key: JIRA_EMAIL
         sync: false
       - key: JIRA_API_TOKEN
         sync: false
+      # Required WHEN demo Jira is set. Confines the agent to these projects —
+      # enforced on the client, so no JQL the model writes can reach past it.
       - key: JIRA_PROJECTS
         sync: false
       - key: NOTION_TOKEN
         sync: false
-      # Pins every Gmail search to the demo slice of a real mailbox. Required
-      # deliberately: an empty scope is a safety hole, not a wider default.
+      # Required WHEN demo Gmail is set. Pins every demo Gmail search to a
+      # slice of a real mailbox: an empty scope is a safety hole, not a wider
+      # default.
       - key: GMAIL_QUERY_SCOPE
+        sync: false
+      # Demo Gmail's cached refresh token, pasted as JSON. The alternative to
+      # uploading .gmail-token.json as a Secret File — `make gmail-auth` is
+      # interactive and cannot run in a container. A secret file wins when both
+      # are present. See docs/deploy.md.
+      - key: GMAIL_TOKEN_JSON
         sync: false
 
       # --- auth ----------------------------------------------------------

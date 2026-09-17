@@ -41,9 +41,13 @@ vi.mock("@/lib/api", async (importOriginal) => {
   };
 });
 
-// demoInfo is a fresh user: nothing connected, demo workspace.
+// demoInfo is a fresh user on a deployment that offers a demo workspace:
+// nothing connected, so nothing is searched until they connect a source or opt
+// into the demo.
 const demoInfo = (): ConnectionsInfo => ({
-  mode: "demo",
+  mode: "none",
+  demo_available: true,
+  indexing_available: true,
   use_demo_workspace: false,
   sources: {
     jira: { status: "absent", writes_enabled: false },
@@ -55,6 +59,8 @@ const demoInfo = (): ConnectionsInfo => ({
 // jiraConnectedInfo is a user who pasted a working Jira token.
 const jiraConnectedInfo = (): ConnectionsInfo => ({
   mode: "user",
+  demo_available: true,
+  indexing_available: true,
   use_demo_workspace: false,
   sources: {
     jira: {
@@ -75,6 +81,8 @@ const jiraConnectedInfo = (): ConnectionsInfo => ({
 // gmailConnectedInfo is a user who just finished the Gmail OAuth callback.
 const gmailConnectedInfo = (): ConnectionsInfo => ({
   mode: "user",
+  demo_available: true,
+  indexing_available: true,
   use_demo_workspace: false,
   sources: {
     jira: { status: "absent", writes_enabled: false },
@@ -90,6 +98,8 @@ const gmailConnectedInfo = (): ConnectionsInfo => ({
 
 const gmailErroredInfo = (): ConnectionsInfo => ({
   mode: "user",
+  demo_available: true,
+  indexing_available: true,
   use_demo_workspace: false,
   sources: {
     jira: { status: "absent", writes_enabled: false },
@@ -124,16 +134,19 @@ describe("ConnectionsPage states", () => {
     expect(screen.getByText("Loading…")).toBeInTheDocument();
   });
 
-  it("renders demo mode for a fresh user: demo banner, three cards, no toggle", async () => {
+  it("tells a fresh user nothing is connected, and offers the demo where one exists", async () => {
     api.getConnections.mockResolvedValue(demoInfo());
     render(<ConnectionsPage />);
 
-    expect(await screen.findByText(/demo workspace/)).toBeInTheDocument();
+    // A fresh account searches nothing until it connects a source. It used to
+    // land in demo mode, which quietly made the deployment owner's real Jira
+    // and mailbox the default identity of every new account.
     expect(
-      screen.getByText(/connect a source below to query your own data/),
+      await screen.findByText(/No sources connected yet/),
     ).toBeInTheDocument();
-    // Nothing connected: the demo toggle would be meaningless and is hidden.
-    expect(screen.queryByLabelText(/Use demo workspace/)).toBeNull();
+    // The demo is offered, not inherited — and only because this fixture's
+    // deployment has one.
+    expect(screen.getByLabelText(/Use demo workspace/)).toBeInTheDocument();
     // The three cards.
     expect(screen.getByRole("heading", { name: "Jira" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Notion" })).toBeInTheDocument();
@@ -171,9 +184,11 @@ describe("ConnectionsPage states", () => {
     await waitFor(() =>
       expect(api.deleteConnection).toHaveBeenCalledWith("jira"),
     );
-    // The reload shows the demo state again.
+    // Disconnecting the last source returns the account to having nothing
+    // connected — not to the demo workspace, which is now only ever entered on
+    // purpose.
     expect(
-      await screen.findByText(/connect a source below to query your own data/),
+      await screen.findByText(/No sources connected yet/),
     ).toBeInTheDocument();
   });
 
@@ -191,6 +206,61 @@ describe("ConnectionsPage states", () => {
     // An errored connection still counts as a connection: the page stays in
     // user mode, never a silent demo swap.
     expect(screen.getByText(/your connected sources/)).toBeInTheDocument();
+  });
+
+  // A deployment with no demo workspace must not advertise a mode it
+  // cannot enter. The card is the only way in, so its absence is the control.
+  it("offers no demo card when the deployment has no demo workspace", async () => {
+    api.getConnections.mockResolvedValue({
+      ...demoInfo(),
+      demo_available: false,
+      indexing_available: false,
+    });
+    render(<ConnectionsPage />);
+
+    expect(
+      await screen.findByText(/No sources connected yet/),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Use demo workspace/)).toBeNull();
+    // ...and the copy does not dangle a demo that does not exist.
+    expect(screen.queryByText(/try the demo workspace/i)).toBeNull();
+    // The three connect cards are still the whole point of the page.
+    expect(screen.getByRole("heading", { name: "Jira" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Notion" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Gmail" })).toBeInTheDocument();
+  });
+
+  // The same user on a deployment that DOES have one is offered it, and told
+  // whose data it is: read-only, and the project owner's.
+  it("offers the demo card, named and read-only, when the deployment has one", async () => {
+    api.getConnections.mockResolvedValue({
+      ...demoInfo(),
+      demo_available: true,
+      indexing_available: true,
+      demo_sources: ["jira", "notion"],
+    });
+    render(<ConnectionsPage />);
+
+    expect(
+      await screen.findByLabelText(/Use demo workspace/),
+    ).not.toBeChecked();
+    // The card says plainly what the demo is: read-only, and only the sources
+    // the deployment actually offers.
+    expect(screen.getByText(/read-only: jira, notion/)).toBeInTheDocument();
+  });
+
+  // A user who connected a source on a demo-less deployment is not offered the
+  // toggle either: the card is gated on the deployment, not on the user.
+  it("offers no demo card to a connected user when there is no demo workspace", async () => {
+    api.getConnections.mockResolvedValue({
+      ...jiraConnectedInfo(),
+      demo_available: false,
+      indexing_available: false,
+    });
+    render(<ConnectionsPage />);
+
+    expect(await screen.findByText("Connected")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Use demo workspace/)).toBeNull();
   });
 
   it("flips the demo toggle through the API and renders the returned overview", async () => {

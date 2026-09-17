@@ -96,19 +96,24 @@ func newFakeNotion(t *testing.T, validToken string) *fakeNotion {
 
 // newConnectionsService builds the connections.Service the router Deps carry,
 // on the same cipher the settings tests use.
-func newConnectionsService(t *testing.T, db api.DB) *connections.Service {
+//
+// demoSources names the demo workspace this deployment offers; passing none
+// means it has none, which is the default posture. Tests that exercise the
+// demo toggle must pass some: the toggle is inert where there is no demo, and
+// the API refuses to switch it on.
+func newConnectionsService(t *testing.T, db api.DB, demoSources ...string) *connections.Service {
 	t.Helper()
 	cipher, err := keys.NewCipher(testKeyEncryptionSecret)
 	if err != nil {
 		t.Fatalf("build cipher: %v", err)
 	}
-	return connections.NewService(db, cipher)
+	return connections.NewService(db, cipher, demoSources...)
 }
 
 // newConnectionsRouter wires a router whose Notion validation hits the fake.
 // (Jira needs no base-URL override: the user pastes their site URL, so tests
 // paste the fake server's.)
-func newConnectionsRouter(t *testing.T, db api.DB, notionBaseURL string) http.Handler {
+func newConnectionsRouter(t *testing.T, db api.DB, notionBaseURL string, demoSources ...string) http.Handler {
 	t.Helper()
 	return api.NewRouter(withTestAuth(api.Deps{
 		DB:            db,
@@ -116,7 +121,7 @@ func newConnectionsRouter(t *testing.T, db api.DB, notionBaseURL string) http.Ha
 		Model:         testModel,
 		Logger:        discardLogger(),
 		Keys:          newTestKeysService(t, db),
-		Connections:   newConnectionsService(t, db),
+		Connections:   newConnectionsService(t, db, demoSources...),
 		NotionBaseURL: notionBaseURL,
 	}))
 }
@@ -154,6 +159,10 @@ type connectionsOverview struct {
 		UpdatedAt *string           `json:"updated_at"`
 		LastError string            `json:"last_error"`
 	} `json:"sources"`
+	// DemoAvailable and DemoSources tell the frontend whether this deployment
+	// has a demo workspace to offer at all; the card is shown only when it does.
+	DemoAvailable bool     `json:"demo_available"`
+	DemoSources   []string `json:"demo_sources"`
 }
 
 func TestPutJiraConnectionValidatesStoresEncryptedAndCapturesIdentity(t *testing.T) {
@@ -257,8 +266,8 @@ func TestPutJiraConnectionRejectsAnInvalidTokenWith422(t *testing.T) {
 	}
 	// The user stays in demo mode: nothing was connected.
 	_, overview := getConnections(t, h)
-	if overview.Mode != "demo" {
-		t.Errorf("mode after a rejected paste = %q, want demo", overview.Mode)
+	if overview.Mode != "none" {
+		t.Errorf("mode after a rejected paste = %q, want none", overview.Mode)
 	}
 }
 
@@ -421,8 +430,8 @@ func TestDeleteConnectionAndModeTransitions(t *testing.T) {
 		t.Fatalf("DELETE notion = %d, want 204 (body %q)", rec.Code, rec.Body.String())
 	}
 	_, overview := getConnections(t, h)
-	if overview.Mode != "demo" {
-		t.Errorf("mode after the last disconnect = %q, want demo", overview.Mode)
+	if overview.Mode != "none" {
+		t.Errorf("mode after the last disconnect = %q, want none", overview.Mode)
 	}
 	if overview.Sources["jira"].Status != "absent" || overview.Sources["notion"].Status != "absent" {
 		t.Errorf("sources after disconnecting = %v, want absent", overview.Sources)
@@ -447,7 +456,9 @@ func TestModeToggleAndErroredConnectionStillCountsAsUser(t *testing.T) {
 
 	pool := testPool(t)
 	jira := newFakeJira(t, email, testJiraToken)
-	h := newConnectionsRouter(t, pool, "")
+	// A deployment that HAS a demo workspace: the toggle is what is under test,
+	// and switching it on where there is no demo is refused.
+	h := newConnectionsRouter(t, pool, "", "jira", "notion")
 
 	if rec := putJSON(t, h, "/api/connections/jira",
 		`{"base_url":"`+jira.server.URL+`","email":"`+email+`","api_token":"`+testJiraToken+`"}`); rec.Code != http.StatusOK {
@@ -527,8 +538,8 @@ func TestConnectionsAreIsolatedPerUser(t *testing.T) {
 	if err := json.Unmarshal(recB.Body.Bytes(), &overviewB); err != nil {
 		t.Fatalf("decode B's overview %q: %v", recB.Body.String(), err)
 	}
-	if overviewB.Mode != "demo" {
-		t.Errorf("B's mode = %q, want demo — A's connection must not leak", overviewB.Mode)
+	if overviewB.Mode != "none" {
+		t.Errorf("B's mode = %q, want none — A's connection must not leak", overviewB.Mode)
 	}
 	if overviewB.Sources["jira"].Status != "absent" {
 		t.Errorf("B sees A's jira connection as %q, want absent", overviewB.Sources["jira"].Status)

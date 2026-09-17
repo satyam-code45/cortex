@@ -312,8 +312,11 @@ func TestDemoModeHasNoWriteToolsAndNoWriters(t *testing.T) {
 	site := newFakeJiraWriteSite(t)
 	builder, svc := newBuilder(t, pool, nil)
 
-	// A user with nothing connected is in demo mode.
+	// A user who has opted into the demo workspace.
 	fresh := insertUser(t, pool)
+	if err := svc.SetUseDemo(context.Background(), fresh, true); err != nil {
+		t.Fatalf("SetUseDemo: %v", err)
+	}
 	registry, _, err := builder.ForUser(context.Background(), fresh)
 	if err != nil {
 		t.Fatalf("ForUser: %v", err)

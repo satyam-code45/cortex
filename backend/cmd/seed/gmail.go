@@ -215,7 +215,7 @@ func buildGmailClient(cfg *config.Config, logger *slog.Logger) (*gmail.Client, e
 	if err != nil {
 		return nil, err
 	}
-	token, err := gmail.LoadToken(cfg.GmailTokenPath)
+	token, err := gmail.LoadToken(cfg.GmailTokenPath, cfg.GmailTokenJSON)
 	if err != nil {
 		return nil, err
 	}

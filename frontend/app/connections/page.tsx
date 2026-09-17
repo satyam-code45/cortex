@@ -358,13 +358,22 @@ export default function ConnectionsPage() {
         ) : (
           <>
             <div className="rounded-md bg-muted px-3 py-2 text-sm">
-              {info.mode === "demo" ? (
+              {info.mode === "none" ? (
+                <p>
+                  <span className="font-medium">No sources connected yet.</span>{" "}
+                  Connect Jira, Notion or Gmail below to ask questions about
+                  your own data
+                  {info.demo_available
+                    ? " — or try the demo workspace to see how it works first."
+                    : "."}
+                </p>
+              ) : info.mode === "demo" ? (
                 <p>
                   Questions currently run against the{" "}
                   <span className="font-medium">demo workspace</span>
                   {hasConnections
                     ? " (the demo toggle is on)."
-                    : " — connect a source below to query your own data."}
+                    : " — read-only sample data owned by whoever runs this deployment, not yours."}
                 </p>
               ) : (
                 <p>
@@ -374,7 +383,10 @@ export default function ConnectionsPage() {
                   in.
                 </p>
               )}
-              {hasConnections && (
+              {/* The demo toggle is offered only where a demo workspace
+                  exists: a deployment without one must not advertise a mode it
+                  cannot enter. */}
+              {info.demo_available && (
                 <label className="mt-2 flex items-center gap-2">
                   <input
                     type="checkbox"
@@ -382,6 +394,11 @@ export default function ConnectionsPage() {
                     onChange={(e) => void setUseDemo(e.target.checked)}
                   />
                   Use demo workspace
+                  {info.demo_sources && info.demo_sources.length > 0 && (
+                    <span className="text-muted-foreground">
+                      (read-only: {info.demo_sources.join(", ")})
+                    </span>
+                  )}
                 </label>
               )}
               {modeError && (

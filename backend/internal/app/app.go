@@ -14,7 +14,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -47,9 +46,22 @@ type Options struct {
 	BYOK bool
 }
 
-// Deps is the assembled graph. Every field is non-nil after a successful Build.
+// Deps is the assembled graph.
+//
+// The demo-workspace fields — JiraClient, NotionClient, GmailClient and
+// Registry — are nil when their source is not configured, and Registry is nil
+// whenever no demo source is. That is a supported deployment, not a partial
+// build: users answer from their own connections, and every consumer reads nil
+// as "this deployment has no demo workspace" rather than failing.
+//
+// Provider and Indexer are nil-able for a second, independent reason: they are
+// the parts funded by the server's own OPENAI_API_KEY, and without one the
+// deployment keeps everything users pay for themselves and loses only the
+// indexed corpus.
 type Deps struct {
-	Pool         *pgxpool.Pool
+	Pool *pgxpool.Pool
+	// Provider is the server's own LLM client, used for embeddings and by
+	// non-BYOK processes. Nil when OPENAI_API_KEY is unset.
 	Provider     llm.Provider
 	Keys         *keys.Service
 	Connections  *connections.Service
@@ -99,34 +111,65 @@ func build(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, logger *
 	}
 	logger.Info("connected to database")
 
-	provider := llm.NewOpenAI(llm.OpenAIConfig{
-		APIKey:         cfg.OpenAIAPIKey,
-		BaseURL:        cfg.OpenAIBaseURL,
-		DefaultModel:   cfg.LLMModel,
-		EmbeddingModel: cfg.EmbeddingModel,
-	})
-
-	jiraClient, err := jira.NewClient(jira.Config{
-		BaseURL:  cfg.JiraBaseURL,
-		Email:    cfg.JiraEmail,
-		APIToken: cfg.JiraAPIToken,
-		Logger:   logger,
-	})
-	if err != nil {
-		return nil, err
+	// The server's own provider, which pays for embeddings and nothing else:
+	// every investigation runs on its owner's stored key. Without a server key
+	// it stays nil, and the two things that need it — the indexing crawl and
+	// the knowledge_base tool — are dropped below rather than built around a
+	// client that would 401 on first use.
+	//
+	// Declared as the interface, not the concrete type, so that "no server key"
+	// is a nil the callers below can actually test. A *llm.OpenAI assigned into
+	// an llm.Provider is non-nil however empty it is.
+	var provider llm.Provider
+	if cfg.OpenAIAPIKey != "" {
+		provider = llm.NewOpenAI(llm.OpenAIConfig{
+			APIKey:         cfg.OpenAIAPIKey,
+			BaseURL:        cfg.OpenAIBaseURL,
+			DefaultModel:   cfg.LLMModel,
+			EmbeddingModel: cfg.EmbeddingModel,
+		})
 	}
 
-	notionClient, err := notion.NewClient(notion.Config{
-		Token:  cfg.NotionToken,
-		Logger: logger,
-	})
-	if err != nil {
-		return nil, err
+	// Each demo client is built only if its source is configured. A deployment
+	// with none of them is a complete product — every user answers from their
+	// own connections — so a nil client here is a supported state that the
+	// registry, indexer and API all read as "this demo source does not exist".
+	var err error
+	var jiraClient *jira.Client
+	if cfg.DemoJira {
+		jiraClient, err = jira.NewClient(jira.Config{
+			BaseURL:  cfg.JiraBaseURL,
+			Email:    cfg.JiraEmail,
+			APIToken: cfg.JiraAPIToken,
+			// The demo site belongs to whoever runs this deployment and its API
+			// token can see every project on it, so JIRA_PROJECTS is enforced on
+			// the client rather than left to the model's JQL. This is the Jira
+			// half of what GMAIL_QUERY_SCOPE does for the demo mailbox.
+			Projects: cfg.JiraProjects,
+			Logger:   logger,
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	gmailClient, err := buildGmailClient(cfg, logger)
-	if err != nil {
-		return nil, err
+	var notionClient *notion.Client
+	if cfg.DemoNotion {
+		notionClient, err = notion.NewClient(notion.Config{
+			Token:  cfg.NotionToken,
+			Logger: logger,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	var gmailClient *gmail.Client
+	if cfg.DemoGmail {
+		gmailClient, err = buildGmailClient(cfg, logger)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// The indexing sources are the same three clients the tools use, wrapped so
@@ -134,50 +177,111 @@ func build(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, logger *
 	// from exactly the text the agent reads live — and, for Gmail, that the crawl
 	// honours GMAIL_QUERY_SCOPE, so a scoped deployment cannot quietly embed
 	// personal mail.
-	indexer, err := rag.New(rag.Config{
-		DB:       pool,
-		Embedder: provider,
-		Sources: []tools.DocumentSource{
-			jira.NewSource(jiraClient, cfg.IndexMaxDocuments, cfg.JiraProjects, logger),
-			notion.NewSource(notionClient, cfg.IndexMaxDocuments, logger),
-			gmail.NewSource(gmailClient, cfg.IndexMaxDocuments, logger),
-		},
-		MaxDocuments: cfg.IndexMaxDocuments,
-		// Passed explicitly rather than left to the zero value. rag.Config
-		// treats a zero OverlapTokens as "no overlap" — a legitimate thing for a
-		// caller to ask for — so omitting it here silently indexed production
-		// with none, instead of the intended 500-token chunks / 50 overlap.
-		ChunkTokens:   rag.DefaultChunkTokens,
-		OverlapTokens: rag.DefaultOverlapTokens,
-		Logger:        logger,
-	})
-	if err != nil {
-		return nil, err
+	var indexSources []tools.DocumentSource
+	if jiraClient != nil {
+		indexSources = append(indexSources, jira.NewSource(jiraClient, cfg.IndexMaxDocuments, cfg.JiraProjects, logger))
+	}
+	if notionClient != nil {
+		indexSources = append(indexSources, notion.NewSource(notionClient, cfg.IndexMaxDocuments, logger))
+	}
+	if gmailClient != nil {
+		indexSources = append(indexSources, gmail.NewSource(gmailClient, cfg.IndexMaxDocuments, logger))
 	}
 
-	knowledgeBase, err := rag.NewSearchTool(rag.SearchConfig{
-		DB:       pool,
-		Embedder: provider,
-		Sources:  indexer.Sources(),
-		Logger:   logger,
-	})
-	if err != nil {
-		return nil, err
+	// No demo sources means nothing to crawl, and rag.New rightly refuses to
+	// build an indexer over an empty source list. The indexer is therefore nil
+	// on a demo-less deployment, and the server registers no indexing worker
+	// and reports no indexable sources — the Sources view and its refresh are
+	// demo features, so they disappear rather than erroring.
+	//
+	// Indexing also needs the server key, since embedding a corpus is the one
+	// thing the server pays for itself. Missing key and demo sources present is
+	// a legitimate configuration — show the demo, don't fund a corpus over it —
+	// so it loses the knowledge base and keeps everything else.
+	var indexer *rag.Indexer
+	switch {
+	case len(indexSources) > 0 && provider == nil:
+		logger.Warn("indexing disabled: OPENAI_API_KEY is not set, so the demo corpus cannot be " +
+			"embedded — the demo's live source tools still work, but search_knowledge_base is not registered")
+	case len(indexSources) > 0:
+		indexer, err = rag.New(rag.Config{
+			DB:           pool,
+			Embedder:     provider,
+			Sources:      indexSources,
+			MaxDocuments: cfg.IndexMaxDocuments,
+			// Passed explicitly rather than left to the zero value. rag.Config
+			// treats a zero OverlapTokens as "no overlap" — a legitimate thing for a
+			// caller to ask for — so omitting it here silently indexed production
+			// with none, instead of the intended 500-token chunks / 50 overlap.
+			ChunkTokens:   rag.DefaultChunkTokens,
+			OverlapTokens: rag.DefaultOverlapTokens,
+			Logger:        logger,
+		})
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	// Nine tools: eight live ones across three sources, plus the knowledge base
-	// over all three. The registry is assembled in one place so a missing source
-	// is a startup failure rather than a silently smaller tool set: an agent that
-	// never learns email exists will still answer a question whose answer is only
-	// in email, and it will answer it wrongly.
-	registry, err := tools.NewRegistry(slices.Concat(
-		jira.NewTools(jiraClient),
-		notion.NewTools(notionClient),
-		gmail.NewTools(gmailClient),
-		[]tools.Tool{knowledgeBase},
-	)...)
-	if err != nil {
-		return nil, err
+	// The demo registry covers exactly the demo sources that exist, plus the
+	// knowledge base over them. With no demo sources there is no demo registry
+	// at all: demo mode is unreachable, and the connections builder reads a nil
+	// here as "this deployment has no demo workspace".
+	//
+	// The knowledge base is part of the demo registry and only of it, because
+	// the indexed corpus IS the demo workspace — offering it to a user
+	// answering from their own Jira would let demo content into an answer about
+	// their real data.
+	var registry *tools.Registry
+	if cfg.HasDemoWorkspace() {
+		var demoTools []tools.Tool
+		if jiraClient != nil {
+			demoTools = append(demoTools, jira.NewTools(jiraClient)...)
+		}
+		if notionClient != nil {
+			demoTools = append(demoTools, notion.NewTools(notionClient)...)
+		}
+		if gmailClient != nil {
+			demoTools = append(demoTools, gmail.NewTools(gmailClient)...)
+		}
+
+		// The knowledge base exists only where the corpus does. It searches
+		// what the indexer wrote and embeds each query to do it, so an indexer
+		// that was never built means there is nothing to search and no way to
+		// search it — registering the tool anyway would put a name in the
+		// model's tool list whose every call fails.
+		if indexer != nil {
+			knowledgeBase, kbErr := rag.NewSearchTool(rag.SearchConfig{
+				DB:       pool,
+				Embedder: provider,
+				Sources:  indexer.Sources(),
+				Logger:   logger,
+			})
+			if kbErr != nil {
+				return nil, kbErr
+			}
+			demoTools = append(demoTools, knowledgeBase)
+		}
+
+		registry, err = tools.NewRegistry(demoTools...)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// cmd/eval runs every case against the demo workspace by design — it is a
+	// server-initiated operation and must never borrow a user's credentials — so
+	// without one it has nothing to evaluate. Said here, where the cause is
+	// obvious, rather than as agent.New's generic "one of Registry or
+	// RegistryForUser is required".
+	if !opts.BYOK && registry == nil {
+		return nil, errors.New("app: no demo workspace is configured, so there is nothing for a non-BYOK process (cmd/eval) to run against; configure a demo source or run the server instead")
+	}
+	// The same reasoning for the key. A non-BYOK process has no run owner to
+	// borrow one from, so the server key is the only thing that can pay for its
+	// completions and its judges — and unlike the server, it cannot degrade to
+	// a smaller feature set and still be doing its job.
+	if !opts.BYOK && provider == nil {
+		return nil, errors.New("app: OPENAI_API_KEY is not set, and a non-BYOK process (cmd/eval) has no run owner whose key it could spend instead; set it to run the eval suite")
 	}
 
 	cipher, err := keys.NewCipher(cfg.LLMKeyEncryptionSecret)
@@ -185,7 +289,7 @@ func build(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, logger *
 		return nil, err
 	}
 	keyService := keys.NewService(pool, cipher)
-	connectionService := connections.NewService(pool, cipher)
+	connectionService := connections.NewService(pool, cipher, cfg.DemoSources()...)
 
 	var connectionBuilder *connections.RegistryBuilder
 
@@ -279,7 +383,7 @@ func buildGmailClient(cfg *config.Config, logger *slog.Logger) (*gmail.Client, e
 	if err != nil {
 		return nil, err
 	}
-	token, err := gmail.LoadToken(cfg.GmailTokenPath)
+	token, err := gmail.LoadToken(cfg.GmailTokenPath, cfg.GmailTokenJSON)
 	if err != nil {
 		return nil, err
 	}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 
 	"github.com/go-chi/chi/v5"
 
@@ -82,10 +83,19 @@ func (s *Server) handlePutConnectionWrites(w http.ResponseWriter, r *http.Reques
 			writeError(w, logger, http.StatusInternalServerError, "internal error")
 			return
 		}
-		if connections.Mode(len(infos), useDemo) == agent.ModeDemo {
+		if connections.Mode(len(infos), useDemo, s.deps.Connections.DemoAvailable()) == agent.ModeDemo {
 			writeError(w, logger, http.StatusConflict,
 				"writes are not available on the demo workspace — it belongs to somebody else. "+
 					"Connect your own source and switch off the demo workspace first")
+			return
+		}
+
+		// Refuse a source the user has not connected before consulting the
+		// readiness check. The check would reach the same answer — it returns
+		// ErrNoConnection — but the list is already in hand, and asking whether
+		// an absent credential can write is a question with no meaning.
+		if !slices.ContainsFunc(infos, func(info connections.Info) bool { return info.Source == source }) {
+			writeError(w, logger, http.StatusNotFound, "no connection for that source")
 			return
 		}
 

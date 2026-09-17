@@ -19,16 +19,42 @@ import { useAuthContext } from "@/components/nav/AppShell";
 import { TracePanel } from "@/components/trace/TracePanel";
 import {
   ApiRequestError,
+  getConnections,
   getTrace,
   listConversations,
   listMessages,
   sendChat,
 } from "@/lib/api";
-import type { Conversation, Message, Trace } from "@/lib/types";
+import type {
+  ConnectionsInfo,
+  Conversation,
+  Message,
+  Trace,
+} from "@/lib/types";
 import { useRunStream } from "@/lib/useRunStream";
 
 export default function Home() {
   const { me } = useAuthContext();
+
+  // undefined while loading, null when the lookup failed. A failed lookup must
+  // not disable the input: the server is the authority and answers 409 if there
+  // is genuinely nothing to search.
+  const [connections, setConnections] = useState<ConnectionsInfo | null | undefined>(
+    undefined,
+  );
+  useEffect(() => {
+    let cancelled = false;
+    void getConnections()
+      .then((info) => {
+        if (!cancelled) setConnections(info);
+      })
+      .catch(() => {
+        if (!cancelled) setConnections(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [conversations, setConversations] = useState<Conversation[] | null>(
     null,
   );
@@ -219,6 +245,13 @@ export default function Home() {
   // box with no explanation reads as a bug; the call-to-action is the state.
   const needsKey = me !== null && !me.has_llm_key;
 
+  // The same for sources. A run needs something to search, and a new account
+  // has nothing connected — the server answers 409 no_sources_connected, so the
+  // input says why up front instead of letting the user compose a question that
+  // cannot run. Rendered only once the connections state is known, so the input
+  // is not briefly disabled on every load.
+  const needsSources = connections !== undefined && connections?.mode === "none";
+
   return (
     <div className="flex h-full">
       <aside className="flex w-64 shrink-0 flex-col border-r">
@@ -254,6 +287,16 @@ export default function Home() {
             {sendError ?? loadError}
           </p>
         )}
+        {!needsKey && needsSources && (
+          <p className="border-t px-4 py-2 text-sm text-muted-foreground">
+            Connect a source to start asking questions —{" "}
+            <Link href="/connections" className="text-primary underline">
+              connect Jira, Notion or Gmail
+            </Link>
+            . Cortex answers from the sources you connect; nothing is searched
+            until you do.
+          </p>
+        )}
         {needsKey && (
           <p className="border-t px-4 py-2 text-sm text-muted-foreground">
             Add your API key to start asking questions —{" "}
@@ -263,7 +306,7 @@ export default function Home() {
             . Your key funds your own conversations; it is stored encrypted.
           </p>
         )}
-        <MessageInput onSend={send} disabled={sending || needsKey} />
+        <MessageInput onSend={send} disabled={sending || needsKey || needsSources} />
       </main>
 
       <aside className="flex w-80 shrink-0 flex-col xl:w-[26rem]">

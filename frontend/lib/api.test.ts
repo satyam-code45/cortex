@@ -30,10 +30,16 @@ function jsonResponse(status: number, body: unknown): Response {
 function installRouting() {
   const onUnauthorized = vi.fn();
   const onLLMKeyRequired = vi.fn();
-  const prev = setAuthRouting({ onUnauthorized, onLLMKeyRequired });
+  const onNoSourcesConnected = vi.fn();
+  const prev = setAuthRouting({
+    onUnauthorized,
+    onLLMKeyRequired,
+    onNoSourcesConnected,
+  });
   return {
     onUnauthorized,
     onLLMKeyRequired,
+    onNoSourcesConnected,
     restore: () => setAuthRouting(prev),
   };
 }
@@ -93,6 +99,28 @@ describe("auth routing", () => {
     }
   });
 
+  // A user with nothing connected is routed to Connections. The
+  // server answers the same shape it uses for a missing LLM key, so the client
+  // routes it the same way — to the page that fixes it, not to an error toast.
+  it("routes a 409 no_sources_connected to connections", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(409, { error: "no_sources_connected" })),
+    );
+    const routing = installRouting();
+    try {
+      await expect(sendChat("hello")).rejects.toMatchObject({
+        status: 409,
+        message: "no_sources_connected",
+      });
+      expect(routing.onNoSourcesConnected).toHaveBeenCalledTimes(1);
+      expect(routing.onLLMKeyRequired).not.toHaveBeenCalled();
+      expect(routing.onUnauthorized).not.toHaveBeenCalled();
+    } finally {
+      routing.restore();
+    }
+  });
+
   it("does not route a 409 that is not llm_key_required", async () => {
     vi.stubGlobal(
       "fetch",
@@ -102,6 +130,7 @@ describe("auth routing", () => {
     try {
       await expect(sendChat("hello")).rejects.toMatchObject({ status: 409 });
       expect(routing.onLLMKeyRequired).not.toHaveBeenCalled();
+      expect(routing.onNoSourcesConnected).not.toHaveBeenCalled();
     } finally {
       routing.restore();
     }
@@ -111,6 +140,7 @@ describe("auth routing", () => {
     const mine: AuthRouting = {
       onUnauthorized: vi.fn(),
       onLLMKeyRequired: vi.fn(),
+      onNoSourcesConnected: vi.fn(),
     };
     const before = setAuthRouting(mine);
     const got = setAuthRouting(before); // restore, capturing what was active

@@ -1,6 +1,8 @@
 package config_test
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,6 +14,8 @@ import (
 // clean slate: every key is explicitly cleared, then the case's values applied.
 var envKeys = []string{
 	"HOST",
+	"FRONTEND_ORIGIN",
+	"API_PUBLIC_URL",
 	"DATABASE_URL",
 	"OPENAI_API_KEY",
 	"OPENAI_BASE_URL",
@@ -32,7 +36,9 @@ var envKeys = []string{
 	"NOTION_PARENT_PAGE_ID",
 	"GMAIL_CREDENTIALS_JSON",
 	"GMAIL_TOKEN_PATH",
+	"GMAIL_TOKEN_JSON",
 	"GMAIL_QUERY_SCOPE",
+	"GMAIL_SEND_ALLOWED_DOMAINS",
 	"GOOGLE_OAUTH_CLIENT_ID",
 	"GOOGLE_OAUTH_CLIENT_SECRET",
 	"AUTH_ALLOWED_EMAILS",
@@ -42,6 +48,9 @@ var envKeys = []string{
 	"LLM_KEY_ENCRYPTION_SECRET",
 	"RUNS_PER_USER_PER_HOUR",
 	"INDEX_REFRESH_COOLDOWN",
+	"ACTION_TTL",
+	"WRITES_PER_USER_PER_HOUR",
+	"WRITE_ACTION_WORKERS",
 }
 
 const (
@@ -51,8 +60,10 @@ const (
 	testJiraEmail    = "dev@example.com"
 	testJiraAPIToken = "jira-test-token"
 
-	testNotionToken    = "ntn-test-token"
-	testGmailCredsPath = "./testdata/gmail-credentials.json"
+	testNotionToken = "ntn-test-token"
+	// testGmailTokenAbsentPath names a file that does not exist, for cases
+	// asserting what a deployment without demo Gmail requires.
+	testGmailTokenAbsentPath = "/nonexistent/cortex-test/gmail-token.json"
 
 	// Vars required since Google sign-in.
 	testGmailQueryScope  = "label:vantage-labs"
@@ -62,6 +73,39 @@ const (
 	testAuthAPIToken     = "auth-test-token"
 	testEncryptionSecret = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 )
+
+// testGmailTokenPath and testGmailCredsPath are existing files, created by
+// TestMain.
+//
+// Demo Gmail counts as configured when its token is readable and requires its
+// OAuth client alongside, so these tests must own both files rather than
+// inherit whatever the developer happens to have in the repository: otherwise
+// demo Gmail is configured on one machine and not another, and every
+// requirement conditional on it differs with it.
+var (
+	testGmailTokenPath string
+	testGmailCredsPath string
+)
+
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "cortex-config-test")
+	if err != nil {
+		panic("create temp dir for the gmail fixtures: " + err.Error())
+	}
+	testGmailTokenPath = filepath.Join(dir, "gmail-token.json")
+	if err := os.WriteFile(testGmailTokenPath,
+		[]byte(`{"refresh_token":"test-refresh-token"}`), 0o600); err != nil {
+		panic("write the gmail token fixture: " + err.Error())
+	}
+	testGmailCredsPath = filepath.Join(dir, "gmail-credentials.json")
+	if err := os.WriteFile(testGmailCredsPath,
+		[]byte(`{"installed":{"client_id":"test","client_secret":"test"}}`), 0o600); err != nil {
+		panic("write the gmail credentials fixture: " + err.Error())
+	}
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
 
 // requiredEnv is the minimum set that lets Load succeed, so a case can state
 // only what it is actually varying.
@@ -78,6 +122,8 @@ func requiredEnv() map[string]string {
 		// evidence missing.
 		"NOTION_TOKEN":           testNotionToken,
 		"GMAIL_CREDENTIALS_JSON": testGmailCredsPath,
+		"GMAIL_TOKEN_PATH":       testGmailTokenPath,
+
 		// Required since Google sign-in opened: its credentials, operator
 		// bearer token, key-encryption secret, and the source pins that keep an
 		// authenticated stranger inside the demo workspace.
@@ -94,6 +140,17 @@ func requiredEnv() map[string]string {
 // at their zero value: every case built on requiredEnv() gets the same required
 // values and defaults, and only a case that varies one of them states it.
 func withSignInWant(want config.Config) config.Config {
+	// Every case built on requiredEnv() configures all three demo sources, so
+	// all three derived flags are true. They are set unconditionally rather
+	// than inferred from the Gmail token path: DemoJira and DemoNotion have
+	// nothing to do with that path, and keying them on it meant the first case
+	// to vary GMAIL_TOKEN_PATH would silently expect all three false and fail
+	// with an unreadable whole-struct diff. A case that configures a different
+	// demo shape belongs in demo_test.go, which asserts the flags directly.
+	want.DemoJira, want.DemoNotion, want.DemoGmail = true, true, true
+	if want.GmailTokenPath == "" {
+		want.GmailTokenPath = testGmailTokenPath
+	}
 	if want.GmailQueryScope == "" {
 		want.GmailQueryScope = testGmailQueryScope
 	}
@@ -157,16 +214,28 @@ func TestLoad(t *testing.T) {
 		want            config.Config
 	}{
 		{
-			name:    "every missing required var is reported in one error",
-			env:     map[string]string{},
+			// The demo sources are absent from this list on purpose: with no
+			// environment at all there is no demo workspace to configure, and a
+			// bring-your-own-sources deployment is a supported one. Demanding
+			// Jira, Notion and Gmail here is what welded the product to one
+			// person's accounts.
+			name: "every missing required var is reported in one error",
+			// GMAIL_TOKEN_PATH is the one variable set, and it is set to a path
+			// that does not exist: demo Gmail counts as configured when its
+			// token file is readable, so without this the case would find the
+			// developer's own .gmail-token.json and demand the pins that go with
+			// a demo workspace.
+			env:     map[string]string{"GMAIL_TOKEN_PATH": testGmailTokenAbsentPath},
 			wantErr: true,
 			wantErrContains: []string{
-				"DATABASE_URL", "OPENAI_API_KEY",
-				"JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN",
-				"NOTION_TOKEN",
+				"DATABASE_URL",
 				"GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET",
 				"AUTH_API_TOKEN", "LLM_KEY_ENCRYPTION_SECRET",
-				"GMAIL_QUERY_SCOPE", "JIRA_PROJECTS",
+			},
+			wantErrOmits: []string{
+				"JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN",
+				"NOTION_TOKEN", "GMAIL_QUERY_SCOPE", "JIRA_PROJECTS",
+				"OPENAI_API_KEY",
 			},
 		},
 		{
@@ -193,22 +262,21 @@ func TestLoad(t *testing.T) {
 			wantErrContains: []string{"DATABASE_URL"},
 			wantErrOmits:    []string{"OPENAI_API_KEY", "JIRA_BASE_URL"},
 		},
+		// OPENAI_API_KEY has no case here because it is required in no
+		// configuration at all. That it is accepted as empty even alongside a
+		// demo workspace — the configuration most likely to want it — is
+		// asserted in demo_test.go, next to the rest of the demo contract.
 		{
-			name:            "missing OPENAI_API_KEY only",
-			env:             withEnv(map[string]string{"OPENAI_API_KEY": ""}),
-			wantErr:         true,
-			wantErrContains: []string{"OPENAI_API_KEY"},
-			wantErrOmits:    []string{"DATABASE_URL", "JIRA_BASE_URL"},
-		},
-		{
-			// Jira became required when the first agent tools landed: they all
-			// reached Jira, so a server without credentials could not answer
-			// anything.
-			name:            "missing JIRA_API_TOKEN only",
+			// A demo source is optional but never half-configured: a site URL
+			// and an email with no token would otherwise build a demo Jira
+			// client that fails every call, with nothing at startup to say why.
+			// The error names the siblings that ARE set, because the fix is
+			// either to supply the token or to unset them.
+			name:            "a partly configured demo Jira is rejected",
 			env:             withEnv(map[string]string{"JIRA_API_TOKEN": ""}),
 			wantErr:         true,
-			wantErrContains: []string{"JIRA_API_TOKEN"},
-			wantErrOmits:    []string{"DATABASE_URL", "OPENAI_API_KEY", "JIRA_BASE_URL", "JIRA_EMAIL"},
+			wantErrContains: []string{"JIRA_API_TOKEN", "partly configured"},
+			wantErrOmits:    []string{"DATABASE_URL", "OPENAI_API_KEY"},
 		},
 		{
 			name: "defaults applied when optional vars unset",
@@ -235,7 +303,7 @@ func TestLoad(t *testing.T) {
 				// Relative credential paths resolve against the repository root,
 				// not the working directory — every make target runs from backend/.
 				GmailCredentialsPath: config.RepoPath(testGmailCredsPath),
-				GmailTokenPath:       config.RepoPath(config.DefaultGmailTokenPath),
+				GmailTokenPath:       testGmailTokenPath,
 			},
 		},
 		{
@@ -273,7 +341,7 @@ func TestLoad(t *testing.T) {
 				// Relative credential paths resolve against the repository root,
 				// not the working directory — every make target runs from backend/.
 				GmailCredentialsPath: config.RepoPath(testGmailCredsPath),
-				GmailTokenPath:       config.RepoPath(config.DefaultGmailTokenPath),
+				GmailTokenPath:       testGmailTokenPath,
 			},
 		},
 		{
@@ -305,7 +373,7 @@ func TestLoad(t *testing.T) {
 				NotionToken:        testNotionToken,
 
 				GmailCredentialsPath: config.RepoPath(testGmailCredsPath),
-				GmailTokenPath:       config.RepoPath(config.DefaultGmailTokenPath),
+				GmailTokenPath:       testGmailTokenPath,
 			},
 		},
 		{
@@ -339,7 +407,7 @@ func TestLoad(t *testing.T) {
 				// Relative credential paths resolve against the repository root,
 				// not the working directory — every make target runs from backend/.
 				GmailCredentialsPath: config.RepoPath(testGmailCredsPath),
-				GmailTokenPath:       config.RepoPath(config.DefaultGmailTokenPath),
+				GmailTokenPath:       testGmailTokenPath,
 			},
 		},
 		{
@@ -371,7 +439,7 @@ func TestLoad(t *testing.T) {
 				// Relative credential paths resolve against the repository root,
 				// not the working directory — every make target runs from backend/.
 				GmailCredentialsPath: config.RepoPath(testGmailCredsPath),
-				GmailTokenPath:       config.RepoPath(config.DefaultGmailTokenPath),
+				GmailTokenPath:       testGmailTokenPath,
 			},
 		},
 		{
@@ -400,7 +468,7 @@ func TestLoad(t *testing.T) {
 				// Relative credential paths resolve against the repository root,
 				// not the working directory — every make target runs from backend/.
 				GmailCredentialsPath: config.RepoPath(testGmailCredsPath),
-				GmailTokenPath:       config.RepoPath(config.DefaultGmailTokenPath),
+				GmailTokenPath:       testGmailTokenPath,
 			},
 		},
 		{
@@ -431,7 +499,7 @@ func TestLoad(t *testing.T) {
 				// Relative credential paths resolve against the repository root,
 				// not the working directory — every make target runs from backend/.
 				GmailCredentialsPath: config.RepoPath(testGmailCredsPath),
-				GmailTokenPath:       config.RepoPath(config.DefaultGmailTokenPath),
+				GmailTokenPath:       testGmailTokenPath,
 			},
 		},
 	}

@@ -148,22 +148,76 @@ func (t *Token) valid() bool {
 	return t.AccessToken != "" && time.Now().Add(refreshSkew).Before(t.Expiry)
 }
 
-// LoadToken reads the cached token from disk.
-func LoadToken(path string) (*Token, error) {
+// LoadToken reads the cached token, preferring the file and falling back to
+// fallbackJSON (the raw contents the file would hold) whenever the file cannot
+// be read — whether it is absent or unreadable.
+//
+// The fallback exists because the token is written by an interactive flow —
+// `make gmail-auth` opens a browser — which cannot be run inside a container,
+// while the hosts this deploys to discard the filesystem on every deploy. The
+// operator pastes the token into the environment once instead. The file still
+// wins when present, so a developer re-authorizing locally takes effect without
+// touching the environment.
+//
+// Note what this does NOT change: a refreshed access token is still written
+// back to the file. On an ephemeral host that write is lost, which is harmless
+// — the durable half is the refresh token, and it is recomputed from the
+// environment on the next boot.
+func LoadToken(path string, fallbackJSON string) (*Token, error) {
 	raw, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("gmail: no cached token at %s — run `make gmail-auth` once to authorize: %w",
-				path, err)
+	switch {
+	case err == nil:
+		token, parseErr := parseToken(raw, path)
+		if parseErr == nil || fallbackJSON == "" {
+			return token, parseErr
 		}
-		return nil, fmt.Errorf("gmail: read token %s: %w", path, err)
+		// A file that exists but does not hold a usable token is the same
+		// situation as one that cannot be read: a truncated or empty secret
+		// file from a botched upload is a real outcome, and refusing to boot
+		// over it while a good token sits in the environment would be the
+		// failure this fallback exists to prevent. The file still wins when it
+		// is valid, so a local re-auth takes effect as before.
+		slog.Warn("gmail: cached token unusable, using GMAIL_TOKEN_JSON instead",
+			"path", path, "error", parseErr)
+		return parseToken([]byte(fallbackJSON), "GMAIL_TOKEN_JSON")
+
+	case fallbackJSON != "":
+		// Any read failure falls back, not only a missing file. The hosts this
+		// exists for mount the token read-only or not at all, so "there is a
+		// path but it cannot be read" — a permission-denied secret mount, a
+		// directory where a file was expected — is the same situation as an
+		// absent file from the operator's point of view: the durable copy is
+		// the one in the environment. Refusing to boot over an unreadable file
+		// while a valid token sits in the environment is the failure this
+		// fallback was added to prevent.
+		//
+		// A missing file is the ordinary case on those hosts and says nothing;
+		// anything else is surprising enough to say out loud, because it means
+		// the operator configured a path that does not work.
+		if !errors.Is(err, os.ErrNotExist) {
+			slog.Warn("gmail: cached token unreadable, using GMAIL_TOKEN_JSON instead",
+				"path", path, "error", err)
+		}
+		return parseToken([]byte(fallbackJSON), "GMAIL_TOKEN_JSON")
+
+	case errors.Is(err, os.ErrNotExist):
+		return nil, fmt.Errorf("gmail: no cached token at %s and GMAIL_TOKEN_JSON is unset — "+
+			"run `make gmail-auth` once to authorize, or set GMAIL_TOKEN_JSON on a host without a "+
+			"persistent filesystem: %w", path, err)
+	default:
+		return nil, fmt.Errorf("gmail: read token %s and GMAIL_TOKEN_JSON is unset: %w", path, err)
 	}
+}
+
+// parseToken decodes token JSON. source names where it came from, so a failure
+// points at the file or the environment variable rather than at "the token".
+func parseToken(raw []byte, source string) (*Token, error) {
 	var token Token
 	if err := json.Unmarshal(raw, &token); err != nil {
-		return nil, fmt.Errorf("gmail: parse token %s: %w", path, err)
+		return nil, fmt.Errorf("gmail: parse token %s: %w", source, err)
 	}
 	if token.RefreshToken == "" {
-		return nil, fmt.Errorf("gmail: %s holds no refresh token — delete it and run `make gmail-auth` again", path)
+		return nil, fmt.Errorf("gmail: %s holds no refresh token — re-run `make gmail-auth` and use the token it writes", source)
 	}
 	return &token, nil
 }

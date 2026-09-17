@@ -47,6 +47,13 @@ const (
 	// maxChangelogFetched caps changelog entries per issue.
 	maxChangelogFetched = 100
 
+	// maxJQLBytes caps one JQL query. Real JQL is tens of bytes; this is orders
+	// of magnitude above anything a question produces. It exists because the
+	// query is written by the model out of text the agent has read — a Jira
+	// comment, an email — so its length is not something Cortex chooses, and
+	// every byte is walked by the confinement scan before any request is made.
+	maxJQLBytes = 4096
+
 	// maxProjectsListed caps jira_list_projects. The seeded site has three; the
 	// cap is there so an unfamiliar site cannot spend the prompt budget on a
 	// project directory.
@@ -172,6 +179,13 @@ func (t *searchIssuesTool) Execute(ctx context.Context, args json.RawMessage) (t
 		return tools.Result{}, fmt.Errorf("decode arguments: %w", err)
 	}
 	jql := strings.TrimSpace(in.JQL)
+	if len(jql) > maxJQLBytes {
+		// Wrapped so the loop reports it rather than retrying: the query is
+		// just as long the second time.
+		return tools.Result{}, fmt.Errorf("the JQL is %d bytes, over the %d-byte limit; "+
+			"narrow the query rather than enumerating values: %w",
+			len(jql), maxJQLBytes, tools.ErrInvalidArgument)
+	}
 	if jql == "" {
 		// Wrapped so the loop does not retry it: Validate cannot express minLength,
 		// so a whitespace-only jql passes schema validation and fails here — and
@@ -259,6 +273,13 @@ func formatIssueLine(iss issue) string {
 // cursor-paginated and reports no total, so the loop terminates on an absent
 // nextPageToken rather than on a count.
 func (c *Client) searchIssues(ctx context.Context, jql string, limit int) ([]issue, error) {
+	// Confinement is applied here rather than in the tool, so that every
+	// caller of searchIssues gets it whether or not it remembered to ask.
+	jql, err := c.scopedJQL(jql)
+	if err != nil {
+		return nil, err
+	}
+
 	var collected []issue
 	pageToken := ""
 
@@ -312,7 +333,7 @@ func (t *getIssueTool) Schema() json.RawMessage {
 }
 
 func (t *getIssueTool) Execute(ctx context.Context, args json.RawMessage) (tools.Result, error) {
-	key, err := decodeIssueKey(args)
+	key, err := t.client.decodeIssueKey(args)
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -385,7 +406,7 @@ func (t *getIssueHistoryTool) Schema() json.RawMessage {
 }
 
 func (t *getIssueHistoryTool) Execute(ctx context.Context, args json.RawMessage) (tools.Result, error) {
-	key, err := decodeIssueKey(args)
+	key, err := t.client.decodeIssueKey(args)
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -463,7 +484,7 @@ func (t *getCommentsTool) Schema() json.RawMessage {
 }
 
 func (t *getCommentsTool) Execute(ctx context.Context, args json.RawMessage) (tools.Result, error) {
-	key, err := decodeIssueKey(args)
+	key, err := t.client.decodeIssueKey(args)
 	if err != nil {
 		return tools.Result{}, err
 	}
@@ -553,15 +574,27 @@ func issueKeySchema(description string) json.RawMessage {
 	return encoded
 }
 
-// decodeIssueKey pulls the issue key out of the arguments and validates it.
-func decodeIssueKey(args json.RawMessage) (string, error) {
+// decodeIssueKey pulls the issue key out of the arguments, validates its shape,
+// and refuses a key outside the projects this client is confined to.
+//
+// A method rather than a free function so that the confinement check cannot be
+// forgotten by a tool that only remembers to validate the shape: every
+// key-addressed read goes through here.
+func (c *Client) decodeIssueKey(args json.RawMessage) (string, error) {
 	var in struct {
 		Key string `json:"key"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return "", fmt.Errorf("decode arguments: %w", err)
 	}
-	return normalizeIssueKey(in.Key)
+	key, err := normalizeIssueKey(in.Key)
+	if err != nil {
+		return "", err
+	}
+	if err := c.requireAllowedIssue(key); err != nil {
+		return "", err
+	}
+	return key, nil
 }
 
 // changelogValue renders one side of a field change.

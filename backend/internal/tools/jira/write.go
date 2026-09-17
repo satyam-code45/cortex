@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -130,6 +131,10 @@ type projectSearchResponse struct {
 // /project/search rather than the deprecated /project: the latter returns an
 // unbounded array, and a site with hundreds of projects would put all of them
 // into the prompt.
+// A scoped client reports only the projects it is confined to. Returning the
+// whole site here would hand the model the keys it needs to address issues it
+// cannot read, and would tell an unauthorized caller the names of projects
+// whose existence is not theirs to learn.
 func (c *Client) listProjects(ctx context.Context) ([]Project, error) {
 	query := url.Values{}
 	query.Set("maxResults", strconv.Itoa(maxProjectsListed))
@@ -139,7 +144,16 @@ func (c *Client) listProjects(ctx context.Context) ([]Project, error) {
 	if err := c.get(ctx, "/rest/api/3/project/search", query, &resp); err != nil {
 		return nil, fmt.Errorf("list projects: %w", err)
 	}
-	return resp.Values, nil
+	if len(c.projects) == 0 {
+		return resp.Values, nil
+	}
+	confined := make([]Project, 0, len(c.projects))
+	for _, p := range resp.Values {
+		if slices.Contains(c.projects, strings.ToUpper(p.Key)) {
+			confined = append(confined, p)
+		}
+	}
+	return confined, nil
 }
 
 // ProjectSpec describes a project to create.

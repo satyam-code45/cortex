@@ -52,7 +52,7 @@ func (r *recordingReadiness) asked() []string {
 
 // newWritesRouter wires a router whose readiness check is the stub. A nil stub
 // stands for a deployment that cannot enable writes at all.
-func newWritesRouter(t *testing.T, pool *pgxpool.Pool, readiness *recordingReadiness) http.Handler {
+func newWritesRouter(t *testing.T, pool *pgxpool.Pool, readiness *recordingReadiness, demoSources ...string) http.Handler {
 	t.Helper()
 	deps := api.Deps{
 		DB:          pool,
@@ -60,7 +60,7 @@ func newWritesRouter(t *testing.T, pool *pgxpool.Pool, readiness *recordingReadi
 		Model:       testModel,
 		Logger:      discardLogger(),
 		Keys:        newTestKeysService(t, pool),
-		Connections: newConnectionsService(t, pool),
+		Connections: newConnectionsService(t, pool, demoSources...),
 	}
 	if readiness != nil {
 		deps.WriteReadiness = readiness.check
@@ -197,6 +197,10 @@ func TestEnablingWritesIsRefusedWhenTheCredentialCannot(t *testing.T) {
 // stranger must not be able to enable writes against it — and the readiness
 // check is never even reached.
 func TestWritesCannotBeEnabledInDemoMode(t *testing.T) {
+	// Nothing connected is no longer demo mode, so the refusal is the plainer
+	// one: there is no jira connection to enable writes on. The readiness check
+	// is still never consulted, which is the property that matters — nothing
+	// about a user's credentials is touched before the request is refused.
 	t.Run("nothing connected", func(t *testing.T) {
 		pool := testPool(t)
 		readiness := &recordingReadiness{}
@@ -204,22 +208,23 @@ func TestWritesCannotBeEnabledInDemoMode(t *testing.T) {
 		insertActionUser(t, pool, devUserEmail)
 
 		rec := putJSONAsHuman(t, pool, h, "/api/connections/jira/writes", `{"enabled":true}`)
-		if rec.Code != http.StatusConflict {
-			t.Fatalf("status = %d, want 409 (body %q)", rec.Code, rec.Body.String())
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404 (body %q)", rec.Code, rec.Body.String())
 		}
-		if !strings.Contains(rec.Body.String(), "demo workspace") {
-			t.Errorf("body %q does not explain that the demo workspace belongs to somebody else",
+		if !strings.Contains(rec.Body.String(), "no connection") {
+			t.Errorf("body %q does not say there is no connection to enable writes on",
 				rec.Body.String())
 		}
 		if got := readiness.asked(); len(got) != 0 {
-			t.Errorf("readiness was consulted %v in demo mode; the refusal is unconditional", got)
+			t.Errorf("readiness was consulted %v with nothing connected", got)
 		}
 	})
 
 	t.Run("demo toggle on with a connection of their own", func(t *testing.T) {
 		pool := testPool(t)
 		readiness := &recordingReadiness{}
-		h := newWritesRouter(t, pool, readiness)
+		// The demo workspace has to exist for a user to be in demo mode.
+		h := newWritesRouter(t, pool, readiness, "jira", "notion")
 		giveJiraConnection(t, pool)
 
 		if rec := putJSONAsHuman(t, pool, h, "/api/connections/mode", `{"use_demo_workspace":true}`); rec.Code != http.StatusOK {

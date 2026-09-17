@@ -115,6 +115,10 @@ func runJira(logger *slog.Logger, confirm bool, fixturesDir, only string, limit 
 		BaseURL:  cfg.JiraBaseURL,
 		Email:    cfg.JiraEmail,
 		APIToken: cfg.JiraAPIToken,
+		// The seeder creates the demo projects, so it cannot be confined to
+		// them: it runs before they exist. It is an operator CLI, not something
+		// a signed-in user can reach.
+		AllowUnscoped: true,
 		// Bulk writes are exactly the workload Jira throttles hardest, and it
 		// answers a throttled one with a Retry-After of 30-60s. The agent-path
 		// default of 8s would clamp that and burn the whole retry budget inside

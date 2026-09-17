@@ -140,17 +140,47 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer deps.Close()
-	logger.Info("tools registered",
-		"count", deps.Registry.Len(), "names", strings.Join(deps.Registry.Names(), ", "))
+	// The startup line states which workspace this deployment offers, because a
+	// demo-less server and a misconfigured one look identical from the outside
+	// otherwise — and the difference decides whether a signed-in stranger can
+	// reach the operator's own Jira and mailbox.
+	if deps.Registry != nil {
+		logger.Info("demo workspace configured",
+			"sources", strings.Join(cfg.DemoSources(), ", "),
+			"tools", deps.Registry.Len(), "names", strings.Join(deps.Registry.Names(), ", "))
+	} else {
+		logger.Info("no demo workspace configured; every user answers from their own connected sources")
+	}
+
+	// Sign-in posture, and the one combination that needs saying out loud: an
+	// open deployment that also carries a demo workspace lets anyone who signs
+	// in search the operator's real Jira and mailbox, inside the configured
+	// pins. That is a deliberate choice for a public showcase and a mistake
+	// everywhere else, so it is named rather than left to be discovered.
+	if len(cfg.AuthAllowedEmails) > 0 {
+		logger.Info("sign-in is restricted", "allowed_emails", len(cfg.AuthAllowedEmails))
+	} else if deps.Registry != nil {
+		logger.Warn("sign-in is open to any Google account AND a demo workspace is configured: " +
+			"anyone who signs in can query the demo Jira, Notion and Gmail. " +
+			"Set AUTH_ALLOWED_EMAILS to restrict sign-in.")
+	} else {
+		logger.Info("sign-in is open to any Google account")
+	}
 
 	worker, err := jobs.NewAgentRunWorker(deps.Orchestrator, logger)
 	if err != nil {
 		return err
 	}
 
-	indexWorker, err := jobs.NewIndexSourceWorker(deps.Indexer, logger)
-	if err != nil {
-		return err
+	// No demo workspace — or no server key to embed one with — means no corpus
+	// to crawl, so the indexing worker is not registered at all and the queue
+	// simply never receives work.
+	var indexWorker *jobs.IndexSourceWorker
+	if deps.Indexer != nil {
+		indexWorker, err = jobs.NewIndexSourceWorker(deps.Indexer, logger)
+		if err != nil {
+			return err
+		}
 	}
 
 	resumeWorker, err := jobs.NewResumeRunWorker(deps.Orchestrator, logger)
@@ -206,12 +236,21 @@ func run(logger *slog.Logger) error {
 	if err := queue.Start(context.WithoutCancel(ctx)); err != nil {
 		return err
 	}
+	// Worker counts are reported as what was actually registered, not as what
+	// the config asked for: an unregistered worker's configured concurrency
+	// reads as "indexing is running with one worker" to anyone diagnosing why
+	// their crawl never starts.
+	indexWorkers := 0
+	if indexWorker != nil {
+		indexWorkers = cfg.IndexWorkers
+	}
 	logger.Info("queue workers started",
 		"agent_queue", jobs.AgentRunQueue, "agent_workers", cfg.AgentRunWorkers,
-		"index_queue", jobs.IndexSourceQueue, "index_workers", cfg.IndexWorkers,
+		"index_queue", jobs.IndexSourceQueue, "index_workers", indexWorkers,
+		"indexing_enabled", indexWorker != nil,
 		"write_queue", jobs.WriteActionQueue, "write_workers", cfg.WriteActionWorkers,
 		"writes_enabled", writeWorker != nil,
-		"tools", deps.Registry.Len())
+		"demo_sources", strings.Join(cfg.DemoSources(), ", "))
 
 	// Binding beyond loopback is only safe once the Host allowlist knows the
 	// name this server is reached at. With API_PUBLIC_URL set that is handled;
@@ -229,7 +268,7 @@ func run(logger *slog.Logger) error {
 		DB:             deps.Pool,
 		Enqueuer:       queue,
 		Model:          cfg.LLMModel,
-		IndexSources:   deps.Indexer.Sources(),
+		IndexSources:   indexSourceNames(deps),
 		FrontendOrigin: cfg.FrontendOrigin,
 		Logger:         logger,
 
@@ -341,4 +380,15 @@ func writeReadiness(deps *app.Deps) func(ctx context.Context, userID uuid.UUID, 
 		return nil
 	}
 	return deps.ConnectionBuilder.CheckWriteReadiness
+}
+
+// indexSourceNames lists the sources POST /api/admin/index accepts, or nothing
+// when this deployment has no demo workspace to index. The API reads an empty
+// list as "indexing is not available here" and hides the feature rather than
+// erroring.
+func indexSourceNames(deps *app.Deps) []string {
+	if deps.Indexer == nil {
+		return nil
+	}
+	return deps.Indexer.Sources()
 }

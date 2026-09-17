@@ -26,6 +26,12 @@ var errLLMKeyRequired = errors.New("llm key required")
 // errRunLimitExceeded means the user hit RUNS_PER_USER_PER_HOUR; mapped to 429.
 var errRunLimitExceeded = errors.New("run limit exceeded")
 
+// errNoSourcesConnected means the user has connected nothing and is not using
+// the demo workspace; the handler maps it to
+// 409 {"error":"no_sources_connected"} and the frontend routes that to
+// Connections, the same shape as llm_key_required routes to settings.
+var errNoSourcesConnected = errors.New("no sources connected")
+
 const (
 	// maxTitleRunes caps the conversation title derived from the first message.
 	maxTitleRunes = 80
@@ -130,6 +136,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, errLLMKeyRequired):
 			// The exact body the frontend's API client routes to settings on.
 			writeError(w, logger, http.StatusConflict, "llm_key_required")
+		case errors.Is(err, errNoSourcesConnected):
+			// The exact body the frontend's API client routes to connections on.
+			writeError(w, logger, http.StatusConflict, "no_sources_connected")
 		case errors.Is(err, errRunLimitExceeded):
 			writeError(w, logger, http.StatusTooManyRequests,
 				fmt.Sprintf("run limit reached (%d per hour) — try again later", s.deps.RunsPerUserPerHour))
@@ -200,6 +209,20 @@ func (s *Server) enqueueRun(ctx context.Context, conversationID *uuid.UUID, mess
 			return queuedRun{}, errLLMKeyRequired
 		}
 		return queuedRun{}, fmt.Errorf("check llm key: %w", err)
+	}
+
+	// The same fail-fast for sources: a user who has connected nothing, on a
+	// deployment with no demo workspace (or without asking for it), has nothing
+	// to search. Checked here so they get a 409 that routes them to Connections
+	// instead of a run row that exists only to fail.
+	if s.deps.Connections != nil {
+		hasSources, err := s.deps.Connections.HasSources(ctx, user.ID)
+		if err != nil {
+			return queuedRun{}, fmt.Errorf("check connected sources: %w", err)
+		}
+		if !hasSources {
+			return queuedRun{}, errNoSourcesConnected
+		}
 	}
 
 	// Per-user rate limit: the LLM spend is the user's own key, but

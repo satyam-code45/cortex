@@ -87,14 +87,17 @@ make web                   # (second terminal) frontend on :3000
 make index                 # (once the server is up) crawl + embed the corpus into the knowledge base
 ```
 
-Notes on `.env`: `JIRA_PROJECTS` pins the agent to your demo projects, `GMAIL_QUERY_SCOPE` pins it to the fixture label — both are required so a signed-in user can never reach data outside the demo set. `AUTH_API_TOKEN` must be set too: `make index` authenticates with it, so an empty value fails the last step of the quickstart. Put your own Google address in `AUTH_ALLOWED_EMAILS` and add it as a consent-screen test user — leaving `AUTH_ALLOWED_EMAILS` empty admits **any** Google account, gated only by your consent screen's test-user list.
+Notes on `.env`: the Jira, Notion and Gmail credentials are **optional** — they configure the *demo workspace*, a read-only showcase users can opt into. Leave them out and Cortex runs bring-your-own-sources: every user connects their own Jira, Notion and Gmail in the app, and a new account connects one before it can ask anything. The quickstart below configures a demo because it is the fastest way to see the agent work.
+
+With a demo configured, `JIRA_PROJECTS` and `GMAIL_QUERY_SCOPE` become required and pin it to your demo projects and the fixture label, so a signed-in user can never reach data outside the demo set. `AUTH_API_TOKEN` must be set too: `make index` authenticates with it, so an empty value fails the last step. Put your own Google address in `AUTH_ALLOWED_EMAILS` and add it as a consent-screen test user — leaving it empty admits **any** Google account, gated only by your consent screen's test-user list, and a demo workspace is somebody's real Jira and real mailbox.
 
 Then in the browser at **http://localhost:3000**:
 
 1. You land on **/login** → *Continue with Google*
 2. Chat is locked until you add your own OpenAI key under **Settings** (*Validate & save* — stored encrypted, only the last 4 digits ever come back)
-3. Back on **Chat**, ask away. **Don't connect anything under Connections** — with zero personal connections you're in demo mode, investigating the seeded corpus with all three sources plus the knowledge base. (Connecting your own Jira/Notion/Gmail switches your runs to *only* your sources — never a mix.)
-4. Watch the trace panel on the right while a run is live: every tool call, its arguments, latency, and what came back.
+3. Go to **Connections** and tick **Use demo workspace** — a new account starts with nothing connected and searches nothing until you either connect a source or opt into the demo. With the demo on you investigate the seeded corpus across all three sources plus the knowledge base. (Connecting your own Jira/Notion/Gmail switches your runs to *only* your sources — never a mix.)
+4. Back on **Chat**, ask away.
+5. Watch the trace panel on the right while a run is live: every tool call, its arguments, latency, and what came back.
 
 ## Demo questions
 

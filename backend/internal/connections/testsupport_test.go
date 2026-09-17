@@ -40,9 +40,20 @@ func newTestCipher(t *testing.T) *keys.Cipher {
 	return cipher
 }
 
+// newTestService builds a Service for a deployment with NO demo workspace,
+// which is the default posture: every user answers from their own connections.
 func newTestService(t *testing.T, pool *pgxpool.Pool) *connections.Service {
 	t.Helper()
 	return connections.NewService(pool, newTestCipher(t))
+}
+
+// newTestServiceWithDemo builds a Service for a deployment that does have a
+// demo workspace, covering the named sources. Tests about the demo toggle need
+// this: a toggle with no demo behind it is inert, so asserting demo mode
+// against a demo-less service would be asserting nothing.
+func newTestServiceWithDemo(t *testing.T, pool *pgxpool.Pool, demoSources ...string) *connections.Service {
+	t.Helper()
+	return connections.NewService(pool, newTestCipher(t), demoSources...)
 }
 
 func discardLogger() *slog.Logger {

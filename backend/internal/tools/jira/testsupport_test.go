@@ -164,26 +164,55 @@ func (f *fakeJira) requestCount() int {
 	return len(f.requests)
 }
 
-// client builds a Client pointed at the fake site.
+// client builds an unscoped Client pointed at the fake site.
+//
+// Unscoped because these tests assert what the tools do with a response, not
+// how a project pin rewrites a request — the pin has its own tests in
+// scope_test.go, which use scopedClient below. A test that wants to see the
+// exact JQL the client sends should use the scoped one.
 //
 // MinInterval is negative to disable the request throttle: the throttle exists
 // to keep the seeder under Jira's rate limit, and paying 120ms per request here
 // would only slow the suite down.
 func (f *fakeJira) client() *jira.Client {
 	f.t.Helper()
+	return f.buildClient(nil, true)
+}
+
+// scopedClient builds a Client confined to the given project keys, as the demo
+// workspace's client is.
+func (f *fakeJira) scopedClient(projects ...string) *jira.Client {
+	f.t.Helper()
+	return f.buildClient(projects, false)
+}
+
+func (f *fakeJira) buildClient(projects []string, allowUnscoped bool) *jira.Client {
+	f.t.Helper()
 	c, err := jira.NewClient(jira.Config{
-		BaseURL:     f.server.URL,
-		Email:       testEmail,
-		APIToken:    testAPIToken,
-		HTTPClient:  f.server.Client(),
-		MaxRetries:  1,
-		MinInterval: -1,
-		Logger:      discardLogger(),
+		BaseURL:       f.server.URL,
+		Email:         testEmail,
+		APIToken:      testAPIToken,
+		Projects:      projects,
+		AllowUnscoped: allowUnscoped,
+		HTTPClient:    f.server.Client(),
+		MaxRetries:    1,
+		MinInterval:   -1,
+		Logger:        discardLogger(),
 	})
 	if err != nil {
 		f.t.Fatalf("build jira client: %v", err)
 	}
 	return c
+}
+
+// scopedToolSet builds the tool set against a project-confined client.
+func (f *fakeJira) scopedToolSet(projects ...string) map[string]tools.Tool {
+	f.t.Helper()
+	byName := make(map[string]tools.Tool)
+	for _, tool := range jira.NewTools(f.scopedClient(projects...)) {
+		byName[tool.Name()] = tool
+	}
+	return byName
 }
 
 // toolSet builds the four tools against the fake site, keyed by name.

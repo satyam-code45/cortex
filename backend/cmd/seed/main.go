@@ -140,7 +140,7 @@ func checkGmailCredentials() error {
 		return err
 	}
 	// The error already names `make gmail-auth`.
-	if _, err := gmail.LoadToken(cfg.GmailTokenPath); err != nil {
+	if _, err := gmail.LoadToken(cfg.GmailTokenPath, cfg.GmailTokenJSON); err != nil {
 		return err
 	}
 	return nil

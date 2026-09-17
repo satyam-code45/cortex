@@ -212,26 +212,43 @@ func TestModeIsDemoOnlyWithNoConnectionsOrTheToggle(t *testing.T) {
 		name            string
 		connectionCount int
 		useDemo         bool
+		demoAvailable   bool
 		want            string
 	}{
-		{"zero connections is demo", 0, false, agent.ModeDemo},
-		{"one connection is user", 1, false, agent.ModeUser},
-		{"three connections is user", 3, false, agent.ModeUser},
-		{"toggle forces demo despite connections", 2, true, agent.ModeDemo},
-		{"toggle with zero connections is demo", 0, true, agent.ModeDemo},
+		// Zero connections is NOT demo. It used to be, which made the
+		// deployment owner's real Jira and mailbox the default identity of
+		// every new account; the demo workspace is now somewhere a user opts
+		// into.
+		{"zero connections is none", 0, false, true, connections.ModeNone},
+		{"one connection is user", 1, false, true, agent.ModeUser},
+		{"three connections is user", 3, false, true, agent.ModeUser},
+		{"toggle forces demo despite connections", 2, true, true, agent.ModeDemo},
+		{"toggle with zero connections is demo", 0, true, true, agent.ModeDemo},
+
+		// A toggle with no demo behind it is inert rather than authoritative.
+		// The row outlives the configuration that justified it: an operator who
+		// removes the demo credentials leaves every opted-in user with
+		// use_demo_workspace still true, and the UI hides the control when
+		// there is no demo — so treating the stale flag as demo mode would
+		// strand those users with no way to turn it off.
+		{"toggle without a demo falls back to their own sources", 2, true, false, agent.ModeUser},
+		{"toggle without a demo and nothing connected is none", 0, true, false, connections.ModeNone},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := connections.Mode(tt.connectionCount, tt.useDemo); got != tt.want {
-				t.Errorf("Mode(%d, %v) = %q, want %q", tt.connectionCount, tt.useDemo, got, tt.want)
+			if got := connections.Mode(tt.connectionCount, tt.useDemo, tt.demoAvailable); got != tt.want {
+				t.Errorf("Mode(%d, %v, %v) = %q, want %q",
+					tt.connectionCount, tt.useDemo, tt.demoAvailable, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestModeReturnsToDemoOnlyWhenTheLastConnectionGoes(t *testing.T) {
+func TestModeReturnsToNoneWhenTheLastConnectionGoes(t *testing.T) {
 	pool := testPool(t)
-	svc := newTestService(t, pool)
+	// A deployment that HAS a demo workspace, so the toggle assertion at the
+	// end is testing the toggle rather than the absence of a demo.
+	svc := newTestServiceWithDemo(t, pool, "jira", "notion")
 	userID := insertUser(t, pool)
 	ctx := context.Background()
 
@@ -245,11 +262,11 @@ func TestModeReturnsToDemoOnlyWhenTheLastConnectionGoes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("UseDemo: %v", err)
 		}
-		return connections.Mode(len(infos), useDemo)
+		return connections.Mode(len(infos), useDemo, svc.DemoAvailable())
 	}
 
-	if got := mode(); got != agent.ModeDemo {
-		t.Fatalf("mode with no connections = %q, want demo", got)
+	if got := mode(); got != connections.ModeNone {
+		t.Fatalf("mode with no connections = %q, want none", got)
 	}
 
 	if err := svc.Save(ctx, userID, connections.SourceJira,
@@ -283,8 +300,8 @@ func TestModeReturnsToDemoOnlyWhenTheLastConnectionGoes(t *testing.T) {
 	if err := svc.Delete(ctx, userID, connections.SourceJira); err != nil {
 		t.Fatalf("Delete jira: %v", err)
 	}
-	if got := mode(); got != agent.ModeDemo {
-		t.Errorf("mode after the last delete = %q, want demo", got)
+	if got := mode(); got != connections.ModeNone {
+		t.Errorf("mode after the last delete = %q, want none", got)
 	}
 
 	// The explicit toggle also forces demo while connections exist.

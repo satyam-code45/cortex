@@ -13,16 +13,31 @@ import { logout } from "@/lib/api";
 import type { Me } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+// Sources browses the indexed corpus, so it is listed only where one exists.
+// Without an index the page has nothing to show and its Refresh answers 503,
+// and a nav entry leading to that reads as a broken feature rather than an
+// absent one.
 const navItems = [
   { href: "/", label: "Chat" },
-  { href: "/sources", label: "Sources" },
+  { href: "/sources", label: "Sources", needsIndex: true },
   { href: "/actions", label: "Actions" },
   { href: "/connections", label: "Connections" },
 ];
 
-export function Header({ me }: { me: Me | null }) {
+export function Header({
+  me,
+  indexingAvailable,
+}: {
+  me: Me | null;
+  // undefined while the capability probe is in flight. The Sources entry is
+  // added only on a positive answer, so a deployment without an index never
+  // shows a tab it would have to take away again.
+  indexingAvailable?: boolean;
+}) {
   const pathname = usePathname();
   if (pathname === "/login") return null;
+
+  const items = navItems.filter((item) => indexingAvailable || !item.needsIndex);
 
   const signOut = async () => {
     try {
@@ -40,7 +55,7 @@ export function Header({ me }: { me: Me | null }) {
         Cortex
       </Link>
       <nav className="flex items-center gap-1">
-        {navItems.map((item) => (
+        {items.map((item) => (
           <Link
             key={item.href}
             href={item.href}

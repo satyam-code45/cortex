@@ -45,12 +45,14 @@ export class ApiRequestError extends Error {
 }
 
 // Cross-cutting auth routing, handled once here rather than at every call
-// site: a 401 anywhere means "signed out" and a 409 llm_key_required anywhere
-// means "go add a key". Injectable so tests can observe the routing without a
-// browser; the defaults are hard navigations, which also reset all app state.
+// site: a 401 anywhere means "signed out", a 409 llm_key_required means "go add
+// a key", and a 409 no_sources_connected means "go connect something".
+// Injectable so tests can observe the routing without a browser; the defaults
+// are hard navigations, which also reset all app state.
 export type AuthRouting = {
   onUnauthorized: () => void;
   onLLMKeyRequired: () => void;
+  onNoSourcesConnected: () => void;
 };
 
 let routing: AuthRouting = {
@@ -61,6 +63,10 @@ let routing: AuthRouting = {
   onLLMKeyRequired: () => {
     if (typeof window !== "undefined")
       window.location.assign("/settings?reason=llm_key_required");
+  },
+  onNoSourcesConnected: () => {
+    if (typeof window !== "undefined")
+      window.location.assign("/connections?reason=no_sources_connected");
   },
 };
 
@@ -104,6 +110,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     if (res.status === 409 && message === "llm_key_required") {
       routing.onLLMKeyRequired();
+    }
+    if (res.status === 409 && message === "no_sources_connected") {
+      routing.onNoSourcesConnected();
     }
     // Still thrown after routing, so in-flight callers settle instead of
     // hanging while the navigation happens.

@@ -88,9 +88,22 @@ export interface ConnectionSourceStatus {
 
 // connectionsResponse
 export interface ConnectionsInfo {
-  mode: "demo" | "user";
+  // "none" is a new account: nothing connected and the demo not asked for, so
+  // no run can start until the user connects a source or (where the deployment
+  // offers one) opts into the demo workspace.
+  mode: "demo" | "user" | "none";
   use_demo_workspace: boolean;
   sources: Record<SourceName, ConnectionSourceStatus>;
+  // Whether this deployment has a demo workspace at all. A deployment without
+  // one must not offer a mode it cannot enter.
+  demo_available: boolean;
+  demo_sources?: SourceName[];
+  // Whether this deployment has an indexed corpus. Not the same question as
+  // demo_available: indexing needs both a demo workspace to crawl and the
+  // server's own OpenAI key to embed it, so a demo configured without that key
+  // has demo_available true and indexing_available false. The Sources view is
+  // a feature of the index, so it gates on this one.
+  indexing_available: boolean;
 }
 
 // ---- Sources (backend/internal/api/documents.go) ----
