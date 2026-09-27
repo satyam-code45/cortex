@@ -1,6 +1,8 @@
 package claudecode
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -63,46 +65,55 @@ type runResult struct {
 // stripped from file paths so steps name repo-relative files.
 func readStream(r io.Reader, root string, emit func(tools.Step)) (runResult, error) {
 	var res runResult
-	dec := json.NewDecoder(r)
+	// Line by line rather than json.Decoder: a stray non-JSON line (a warning
+	// on stdout) is skipped, where a decoder would stop reading and leave
+	// claude blocked on a full pipe until the timeout.
+	br := bufio.NewReader(r)
 	for {
-		var line streamLine
-		if err := dec.Decode(&line); err != nil {
-			if errors.Is(err, io.EOF) {
-				return res, nil
-			}
+		raw, err := br.ReadBytes('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
 			return res, fmt.Errorf("claude_code: read stream: %w", err)
 		}
-		parent := ""
-		if line.ParentToolUseID != nil {
-			parent = *line.ParentToolUseID
+		var line streamLine
+		if json.Unmarshal(bytes.TrimSpace(raw), &line) == nil {
+			handleLine(line, &res, root, emit)
 		}
+		if err != nil {
+			return res, nil
+		}
+	}
+}
 
-		switch line.Type {
-		case "result":
-			res.Seen = true
-			res.Subtype = line.Subtype
-			res.IsError = line.IsError
-			res.NumTurns = line.NumTurns
-			res.DurationMS = line.DurationMS
-			res.TotalCostUSD = line.TotalCostUSD
-			res.SessionID = line.SessionID
-			res.Text = line.Result
-		case "assistant", "user":
-			if line.Message == nil {
+func handleLine(line streamLine, res *runResult, root string, emit func(tools.Step)) {
+	parent := ""
+	if line.ParentToolUseID != nil {
+		parent = *line.ParentToolUseID
+	}
+	switch line.Type {
+	case "result":
+		res.Seen = true
+		res.Subtype = line.Subtype
+		res.IsError = line.IsError
+		res.NumTurns = line.NumTurns
+		res.DurationMS = line.DurationMS
+		res.TotalCostUSD = line.TotalCostUSD
+		res.SessionID = line.SessionID
+		res.Text = line.Result
+	case "assistant", "user":
+		if line.Message == nil {
+			return
+		}
+		for _, b := range line.Message.Content {
+			step, ok := toStep(b, parent, root)
+			if !ok {
 				continue
 			}
-			for _, b := range line.Message.Content {
-				step, ok := toStep(b, parent, root)
-				if !ok {
-					continue
+			if step.Kind == "tool_use" && (step.Tool == "Agent" || step.Tool == "Task") {
+				if kind := subagentType(b.Input); kind != "" && !slices.Contains(res.Subagents, kind) {
+					res.Subagents = append(res.Subagents, kind)
 				}
-				if step.Kind == "tool_use" && (step.Tool == "Agent" || step.Tool == "Task") {
-					if kind := subagentType(b.Input); kind != "" && !slices.Contains(res.Subagents, kind) {
-						res.Subagents = append(res.Subagents, kind)
-					}
-				}
-				emit(step)
 			}
+			emit(step)
 		}
 	}
 }
