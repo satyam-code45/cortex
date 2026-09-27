@@ -403,3 +403,41 @@ token.
 
 **Chat is disabled with no obvious reason** — the signed-in user has no OpenAI key of their
 own. Add it under **Settings**; chat deliberately spends the user's key, not the server's.
+
+## 10. Delegating issues to Claude Code (optional)
+
+Cortex can hand a Jira issue to [Claude Code](https://code.claude.com). You ask
+"fix PAY-142"; the agent investigates, then proposes a delegation with the exact
+prompt it would send. Nothing starts until you approve it — and you can edit the
+prompt first. Claude Code then works on **your** machine, in a fresh git
+worktree, and its steps stream into the trace panel. When it finishes, its
+changes are committed to a local branch `cortex/<issue>-<id>` and the run answers
+with its summary. **Nothing is ever pushed.**
+
+The work runs in a separate process, the runner, because it needs your repos and
+your Claude Code login — neither exists on the server.
+
+1. Install Claude Code and log in once: `claude` (or set `ANTHROPIC_API_KEY`).
+2. Sign in to the Cortex web app once with the account the runner will act for.
+3. In `.env`, set `RUNNER_USER_EMAIL` and `RUNNER_REPOS` (see `.env.example`).
+   `DATABASE_URL` must point at the same database the server uses.
+4. `make runner`. It logs `runner online`; from then on the agent can propose
+   delegations for those repos. Stop it with Ctrl-C and the tool disappears
+   within two minutes.
+
+Review the result with `git diff main...cortex/<issue>-<id>` in the repo.
+
+**How it is fenced.** Claude Code gets only the tools in the repo's `tools` list
+(no web access), runs with `--setting-sources project --strict-mcp-config` so
+your personal hooks, plugins and claude.ai connectors are out of reach, gets an
+environment with no database URL or Cortex secrets, and is capped by
+`RUNNER_MAX_TURNS`, `RUNNER_MAX_BUDGET_USD` and `RUNNER_TIMEOUT`. Everything it
+is told is the prompt you approved: the issue text inside it is untrusted, which
+is why a person reads it first.
+
+**If the runner stops mid-task** the delegation is marked failed on the next
+start ("interrupted"), never silently re-run. Partial work stays in its worktree
+under `RUNNER_WORKTREE_DIR`.
+
+**Neon note.** The runner polls every 5 s and heartbeats every 30 s, which keeps
+a Neon database awake while it runs. Stop it when you are not using it.

@@ -8,10 +8,13 @@ DATABASE_URL ?= postgres://cortex:cortex@localhost:5432/cortex?sslmode=disable
 TEST_DATABASE_URL ?= postgres://cortex:cortex@localhost:5432/cortex_test?sslmode=disable
 
 .PHONY: dev web migrate migrate-test river-migrate river-migrate-test sqlc test check check-web \
-	seed seed-plan seed-jira seed-notion seed-notion-replace seed-gmail gmail-auth eval index
+	runner seed seed-plan seed-jira seed-notion seed-notion-replace seed-gmail gmail-auth eval index
 
 dev: ## run the API server (includes queue workers)
 	cd backend && go run ./cmd/server
+
+runner: ## run the Claude Code runner on this machine (see docs/setup.md §10)
+	cd backend && go run ./cmd/runner
 
 # PORT is overridden explicitly: this Makefile exports .env, where PORT is the
 # BACKEND's port (8080) — and `next dev` also honours PORT, so without the
