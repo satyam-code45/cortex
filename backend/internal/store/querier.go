@@ -233,6 +233,10 @@ type Querier interface {
 	// run row rather than using an advisory lock so the lock is released by COMMIT
 	// with no separate unlock to leak.
 	LockAgentRunForSettlement(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	// Serializes appends to one run until the caller's transaction ends. A
+	// delegation appends progress for minutes while approvals and sibling writes
+	// append too; without this two inserts can compute the same max(seq)+1.
+	LockRunEvents(ctx context.Context, agentRunID uuid.UUID) error
 	// running -> awaiting_approval. The status guard keeps the transition honest for
 	// a run that raced to a terminal state; no rows means there is nothing to pause.
 	//

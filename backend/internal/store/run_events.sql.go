@@ -119,3 +119,15 @@ func (q *Queries) ListRunEventsByRunAfterSeq(ctx context.Context, arg ListRunEve
 	}
 	return items, nil
 }
+
+const lockRunEvents = `-- name: LockRunEvents :exec
+SELECT pg_advisory_xact_lock(hashtextextended('cortex.run_events:' || $1::uuid::text, 0))
+`
+
+// Serializes appends to one run until the caller's transaction ends. A
+// delegation appends progress for minutes while approvals and sibling writes
+// append too; without this two inserts can compute the same max(seq)+1.
+func (q *Queries) LockRunEvents(ctx context.Context, agentRunID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, lockRunEvents, agentRunID)
+	return err
+}

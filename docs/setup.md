@@ -428,10 +428,14 @@ your Claude Code login — neither exists on the server.
 Review the result with `git diff main...cortex/<issue>-<id>` in the repo.
 
 **How it is fenced.** Claude Code gets only the tools in the repo's `tools` list
-(no web access), runs with `--setting-sources project --strict-mcp-config` so
-your personal hooks, plugins and claude.ai connectors are out of reach, gets an
-environment with no database URL or Cortex secrets, and is capped by
-`RUNNER_MAX_TURNS`, `RUNNER_MAX_BUDGET_USD` and `RUNNER_TIMEOUT`. Everything it
+(no web access). It loads no settings files and no hooks at all (`--setting-sources ""`
+with hooks disabled, `--strict-mcp-config`), so neither your personal hooks,
+plugins and claude.ai connectors nor a repo's own Claude Code project settings can
+widen what it may do. It reads and writes only inside its worktree, gets an
+environment with no database URL or Cortex secrets, starts only from a local
+branch, and is capped by `RUNNER_MAX_TURNS`, `RUNNER_MAX_BUDGET_USD` and
+`RUNNER_TIMEOUT`. The runner's own git commands run with hooks off: the agent
+could have edited them, and they would run with the runner's privileges. Everything it
 is told is the prompt you approved: the issue text inside it is untrusted, which
 is why a person reads it first.
 

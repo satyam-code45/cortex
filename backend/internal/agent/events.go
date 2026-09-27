@@ -450,6 +450,11 @@ func appendEvent(ctx context.Context, q store.Querier, runID uuid.UUID, eventTyp
 	if err != nil {
 		return fmt.Errorf("marshal %s payload: %w", eventType, err)
 	}
+	// Separate statement so the insert's snapshot is taken after the lock
+	// is held, and sees the previous appender's committed row.
+	if err := q.LockRunEvents(ctx, runID); err != nil {
+		return fmt.Errorf("lock %s events: %w", eventType, err)
+	}
 	if _, err := q.InsertRunEvent(ctx, store.InsertRunEventParams{
 		AgentRunID: runID,
 		Type:       eventType,

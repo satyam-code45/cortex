@@ -58,6 +58,8 @@ func run(logger *slog.Logger) error {
 	}
 	defer pool.Close()
 	q := store.New(pool)
+	// Connected; nothing this process starts needs the URL again.
+	_ = os.Unsetenv("DATABASE_URL")
 
 	user, err := q.GetUserByEmail(ctx, cfg.userEmail)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -80,6 +82,25 @@ func run(logger *slog.Logger) error {
 	if !locked {
 		return fmt.Errorf("another runner is already running for %s; stop it first", cfg.userEmail)
 	}
+	// The lock lives exactly as long as that connection. If it drops (sleep,
+	// network change) Postgres frees the lock, so stop rather than run unguarded.
+	ctx, lost := context.WithCancelCause(ctx)
+	defer lost(nil)
+	go func() {
+		t := time.NewTicker(30 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				if err := lockConn.Ping(ctx); err != nil && ctx.Err() == nil {
+					lost(fmt.Errorf("lost the runner lock connection: %w", err))
+					return
+				}
+			}
+		}
+	}()
 
 	// Insert-only: never started, so it never joins River's leader election.
 	// It exists to enqueue the resume once a delegation settles.
@@ -116,7 +137,13 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	logger.Info("runner online", "user", cfg.userEmail, "name", cfg.name, "repos", writer.RepoNames())
-	return r.Run(ctx)
+	if err := r.Run(ctx); err != nil {
+		return err
+	}
+	if cause := context.Cause(ctx); cause != nil && !errors.Is(cause, context.Canceled) {
+		return cause
+	}
+	return nil
 }
 
 type config struct {
@@ -143,8 +170,11 @@ func loadConfig() (config, error) {
 	if rawRepos == "" {
 		return cfg, errors.New(`RUNNER_REPOS is required, e.g. {"cortex":{"path":"/home/me/cortex"}}`)
 	}
-	if err := json.Unmarshal([]byte(rawRepos), &cfg.writer.Repos); err != nil {
-		return cfg, fmt.Errorf("RUNNER_REPOS is not valid JSON: %w", err)
+	// Strict, so a misspelt "tools" is an error rather than the defaults.
+	dec := json.NewDecoder(strings.NewReader(rawRepos))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&cfg.writer.Repos); err != nil {
+		return cfg, fmt.Errorf("RUNNER_REPOS: %w", err)
 	}
 
 	cfg.writer.WorktreeDir = os.Getenv("RUNNER_WORKTREE_DIR")
@@ -169,10 +199,6 @@ func loadConfig() (config, error) {
 	}
 	if cfg.writer.Timeout, err = durationEnv("RUNNER_TIMEOUT"); err != nil {
 		return cfg, err
-	}
-	if cfg.writer.Timeout >= time.Hour {
-		// River's stuck-job rescue is an hour; stay under it.
-		return cfg, errors.New("RUNNER_TIMEOUT must be under 1h")
 	}
 	if cfg.poll, err = durationEnv("RUNNER_POLL_INTERVAL"); err != nil {
 		return cfg, err
@@ -208,6 +234,8 @@ func claudeVersion(ctx context.Context, bin string) string {
 	if bin == "" {
 		bin = "claude"
 	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	out, err := exec.CommandContext(ctx, bin, "--version").Output()
 	if err != nil {
 		return ""

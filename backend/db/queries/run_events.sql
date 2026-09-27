@@ -24,3 +24,9 @@ SELECT * FROM run_events
 WHERE agent_run_id = $1
   AND seq > $2
 ORDER BY seq;
+
+-- name: LockRunEvents :exec
+-- Serializes appends to one run until the caller's transaction ends. A
+-- delegation appends progress for minutes while approvals and sibling writes
+-- append too; without this two inserts can compute the same max(seq)+1.
+SELECT pg_advisory_xact_lock(hashtextextended('cortex.run_events:' || sqlc.arg(agent_run_id)::uuid::text, 0));

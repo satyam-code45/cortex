@@ -1,10 +1,6 @@
-// Package runner performs its owner's approved Claude Code delegations.
-//
-// It polls rather than working a River queue: any River client that works a
-// queue can be elected leader, and a laptop holding leadership would stop the
-// server's periodic jobs. Execution itself goes through the same
-// ExecuteWriteWorker.Perform as every other write, so claiming, settling and
-// resuming the run are shared, not copied.
+// Package runner performs its owner's approved Claude Code delegations. It
+// polls instead of joining River, whose leader election would let a laptop
+// stall the server's periodic jobs; execution goes through the shared Perform.
 package runner
 
 import (
@@ -12,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -75,7 +72,11 @@ func (r *Runner) Run(ctx context.Context) error {
 	if err := r.Heartbeat(ctx); err != nil {
 		return err
 	}
+	// Deferred first so it runs last: the heartbeat goroutine is gone before
+	// the row is deleted, so a late beat cannot bring the runner back online.
+	var beats sync.WaitGroup
 	defer func() {
+		beats.Wait()
 		offline, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		if err := r.cfg.Queries.DeleteCodeRunner(offline, store.DeleteCodeRunnerParams{
@@ -88,9 +89,14 @@ func (r *Runner) Run(ctx context.Context) error {
 		return err
 	}
 
-	// In the background, because one delegation can block the poll loop for
-	// its whole run.
-	go r.heartbeatLoop(ctx)
+	// In the background: one delegation can block the poll loop for its run.
+	beatCtx, stopBeats := context.WithCancel(ctx)
+	defer stopBeats()
+	beats.Add(1)
+	go func() {
+		defer beats.Done()
+		r.heartbeatLoop(beatCtx)
+	}()
 
 	poll := time.NewTicker(r.cfg.PollInterval)
 	defer poll.Stop()
@@ -139,10 +145,8 @@ func (r *Runner) Heartbeat(ctx context.Context) error {
 	return nil
 }
 
-// RecoverInterrupted settles delegations a previous runner left in
-// 'executing'. Attempt 2 routes them through the worker's "interrupted, never
-// re-run" branch. Only safe because cmd/runner holds a per-account advisory
-// lock: no other live runner can be working on them.
+// RecoverInterrupted fails, never re-runs, delegations a dead runner left in
+// 'executing'. Safe only under cmd/runner's per-account lock.
 func (r *Runner) RecoverInterrupted(ctx context.Context) error {
 	return r.performAll(ctx, actions.StatusExecuting, 2)
 }

@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"cortex/internal/tools"
 )
@@ -46,7 +47,7 @@ type WriterConfig struct {
 	Model        string
 	MaxTurns     int
 	MaxBudgetUSD float64
-	// Timeout stays under River's one-hour stuck-job rescue.
+	// Timeout bounds one delegation; 40 minutes by default.
 	Timeout  time.Duration
 	MaxSteps int
 	Logger   *slog.Logger
@@ -125,11 +126,16 @@ func (w *Writer) ExecuteWithProgress(ctx context.Context, raw json.RawMessage, e
 	if err := os.MkdirAll(w.cfg.WorktreeDir, 0o755); err != nil {
 		return tools.WriteOutcome{}, fmt.Errorf("claude_code: create worktree dir: %w", err)
 	}
+	// A local branch only: a remote ref is whatever someone else pushed.
+	if _, err := git(ctx, repo.Path, "rev-parse", "--verify", "--quiet", "refs/heads/"+p.BaseBranch); err != nil {
+		return tools.WriteOutcome{}, fmt.Errorf("claude_code: %q is not a local branch in %s", p.BaseBranch, p.Repo)
+	}
 	if _, err := git(ctx, repo.Path, "worktree", "add", "-b", branch, dir, p.BaseBranch); err != nil {
 		return tools.WriteOutcome{}, fmt.Errorf("claude_code: create worktree from %s: %w", p.BaseBranch, err)
 	}
 
-	res, runErr := w.run(ctx, dir, repo, p, branch, w.capped(emit))
+	counted, steps := w.capped(emit)
+	res, runErr := w.run(ctx, dir, repo, p, branch, counted)
 
 	// Recorded before judging the run, so partial work is never lost.
 	detail := map[string]any{
@@ -140,47 +146,35 @@ func (w *Writer) ExecuteWithProgress(ctx context.Context, raw json.RawMessage, e
 		"duration_ms":    res.DurationMS,
 		"total_cost_usd": res.TotalCostUSD,
 		"subagents":      nonNil(res.Subagents),
+		"steps_total":    *steps,
 	}
-	// Generous: the repo's own pre-commit hook may run its whole test suite.
-	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Minute)
+	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 	defer cancel()
-	changed, err := w.commit(commitCtx, dir, p, res, detail)
-	if err != nil {
-		// The edits are still in the worktree; say where rather than lose them.
-		return tools.WriteOutcome{}, fmt.Errorf("claude_code: %w (the changes are left uncommitted in %s)", err, dir)
+	changed, commitErr := w.commit(commitCtx, dir, p, res, detail)
+	detail["outcome"] = outcomeOf(res, runErr, commitErr, changed)
+
+	switch {
+	case commitErr != nil:
+		// Uncommitted edits live only in the worktree, so it stays.
+		runErr = errors.Join(runErr, fmt.Errorf(
+			"claude_code: commit failed, the changes are left uncommitted in worktree %s on the runner: %s",
+			filepath.Base(dir), relPaths(commitErr.Error(), dir)))
+	case changed:
+		// The branch holds the commits; the checkout is not needed any more.
+		if _, err := git(commitCtx, repo.Path, "worktree", "remove", "--force", dir); err != nil {
+			w.cfg.Logger.Warn("could not remove worktree", "dir", dir, "error", err)
+		}
+	default:
+		w.discard(commitCtx, repo.Path, dir, branch)
+		delete(detail, "branch")
 	}
 
 	if runErr != nil {
-		// Returned with the error so cost, session and outcome survive a failure.
-		detail["outcome"] = "error"
-		if errors.Is(runErr, errTimeout) {
-			detail["outcome"] = "timeout"
-		}
-		failed := tools.WriteOutcome{Detail: detail}
 		if changed {
-			return failed, fmt.Errorf("%w (partial work committed on %s)", runErr, branch)
+			runErr = fmt.Errorf("%w (partial work committed on %s)", runErr, branch)
 		}
-		w.discard(commitCtx, repo.Path, dir, branch)
-		delete(detail, "branch")
-		return failed, runErr
-	}
-
-	switch {
-	case strings.HasPrefix(res.Subtype, "error_max"):
-		detail["outcome"] = "max_turns"
-	case changed:
-		detail["outcome"] = "changes"
-	default:
-		detail["outcome"] = "no_changes"
-	}
-	if changed {
-		// The branch holds the commit; the checkout is not needed any more.
-		if _, err := git(commitCtx, repo.Path, "worktree", "remove", dir); err != nil {
-			w.cfg.Logger.Warn("could not remove worktree", "dir", dir, "error", err)
-		}
-	} else {
-		w.discard(commitCtx, repo.Path, dir, branch)
-		delete(detail, "branch")
+		// Returned with the error so cost, session and outcome survive a failure.
+		return tools.WriteOutcome{Detail: detail}, runErr
 	}
 
 	_, summary := splitSubject(res.Text)
@@ -188,6 +182,20 @@ func (w *Writer) ExecuteWithProgress(ctx context.Context, raw json.RawMessage, e
 		summary = "Claude Code finished without a summary."
 	}
 	return tools.WriteOutcome{Summary: summary, Detail: detail}, nil
+}
+
+func outcomeOf(res runResult, runErr, commitErr error, changed bool) string {
+	switch {
+	case errors.Is(runErr, errTimeout):
+		return "timeout"
+	case runErr != nil, commitErr != nil:
+		return "error"
+	case strings.HasPrefix(res.Subtype, "error_max"):
+		return "max_turns"
+	case changed:
+		return "changes"
+	}
+	return "no_changes"
 }
 
 // run starts claude and reads its stream until it exits.
@@ -220,7 +228,7 @@ func (w *Writer) run(ctx context.Context, dir string, repo Repo, p Payload, bran
 	case errors.Is(ctx.Err(), context.Canceled):
 		return res, errors.New("claude_code: the runner was stopped before Claude Code finished")
 	case !res.Seen:
-		msg := strings.TrimSpace(stderr.String())
+		msg := relPaths(strings.TrimSpace(stderr.String()), dir)
 		if readErr != nil {
 			msg = strings.TrimSpace(readErr.Error() + "\n" + msg)
 		}
@@ -244,9 +252,11 @@ func (w *Writer) args(repo Repo, p Payload, branch string) []string {
 		"--output-format", "stream-json", "--verbose",
 		"--permission-mode", "acceptEdits",
 		"--tools", strings.Join(toolset, ","),
-		// The owner's personal hooks, plugins and claude.ai connectors stay
-		// out: an injected prompt must not reach them.
-		"--setting-sources", "project",
+		// No settings files at all — the owner's hooks and plugins, and the
+		// repo's own project settings file, which the base branch controls —
+		// and no claude.ai connectors.
+		"--setting-sources", "",
+		"--settings", `{"disableAllHooks":true}`,
 		"--strict-mcp-config",
 		"--disallowedTools", "WebFetch,WebSearch",
 		"--max-turns", strconv.Itoa(w.cfg.MaxTurns),
@@ -267,47 +277,64 @@ func (w *Writer) args(repo Repo, p Payload, branch string) []string {
 	return args
 }
 
-// capped forwards the first MaxSteps steps and counts the rest.
-func (w *Writer) capped(emit func(tools.Step)) func(tools.Step) {
-	n := 0
+// capped forwards the first MaxSteps steps and counts all of them.
+func (w *Writer) capped(emit func(tools.Step)) (func(tools.Step), *int) {
+	n := new(int)
 	return func(s tools.Step) {
-		n++
+		*n++
 		switch {
-		case n < w.cfg.MaxSteps:
+		case *n < w.cfg.MaxSteps:
 			emit(s)
-		case n == w.cfg.MaxSteps:
+		case *n == w.cfg.MaxSteps:
 			emit(tools.Step{Kind: "text", Detail: "further steps are not shown; the full session is on the runner"})
 		}
-	}
+	}, n
 }
 
-// commit stages and commits everything in the worktree. It reports whether
-// there was anything to commit and fills files_changed, diffstat, commit_sha.
+// commit commits whatever the agent left uncommitted, then reports whether
+// the branch is ahead of its base — which also counts commits the agent made
+// itself, so those are never discarded.
 func (w *Writer) commit(ctx context.Context, dir string, p Payload, res runResult, detail map[string]any) (bool, error) {
 	if _, err := git(ctx, dir, "add", "-A"); err != nil {
 		return false, fmt.Errorf("stage changes: %w", err)
 	}
-	names, err := git(ctx, dir, "diff", "--cached", "--name-only")
+	staged, err := git(ctx, dir, "diff", "--cached", "--name-only")
 	if err != nil {
 		return false, fmt.Errorf("list changes: %w", err)
 	}
-	if names == "" {
+	if staged != "" {
+		// Not the product's name: some repos' commit-msg hooks refuse it.
+		subject := p.IssueKey + ": delegated change"
+		if s, _ := splitSubject(res.Text); s != "" {
+			subject = p.IssueKey + ": " + s
+		}
+		if _, err := git(ctx, dir, "-c", "commit.gpgsign=false", "commit", "-q", "--no-verify",
+			"-m", subject, "-m", "Delegated from Cortex."); err != nil {
+			return false, fmt.Errorf("commit: %w", err)
+		}
+	}
+
+	ahead, err := git(ctx, dir, "rev-list", "--count", p.BaseBranch+"..HEAD")
+	if err != nil {
+		return false, fmt.Errorf("count commits: %w", err)
+	}
+	if ahead == "0" {
 		return false, nil
 	}
-	stat, _ := git(ctx, dir, "diff", "--cached", "--shortstat")
-	detail["files_changed"] = strings.Split(names, "\n")
-	detail["diffstat"] = stat
-
-	// Not the product's name: some repos' commit-msg hooks refuse it.
-	subject := p.IssueKey + ": delegated change"
-	if s, _ := splitSubject(res.Text); s != "" {
-		subject = p.IssueKey + ": " + s
+	span := p.BaseBranch + "...HEAD"
+	if names, err := git(ctx, dir, "diff", "--name-only", span); err == nil {
+		detail["files_changed"] = strings.Split(names, "\n")
+	} else {
+		w.cfg.Logger.Warn("could not list changed files", "error", err)
 	}
-	if _, err := git(ctx, dir, "commit", "-q", "-m", subject, "-m", "Delegated from Cortex."); err != nil {
-		return true, fmt.Errorf("commit: %w", err)
+	if stat, err := git(ctx, dir, "diff", "--shortstat", span); err == nil {
+		detail["diffstat"] = stat
 	}
-	sha, _ := git(ctx, dir, "rev-parse", "--short", "HEAD")
-	detail["commit_sha"] = sha
+	if sha, err := git(ctx, dir, "rev-parse", "--short", "HEAD"); err == nil {
+		detail["commit_sha"] = sha
+	} else {
+		w.cfg.Logger.Warn("could not read the commit", "error", err)
+	}
 	return true, nil
 }
 
@@ -322,26 +349,16 @@ func (w *Writer) discard(ctx context.Context, repoPath, dir, branch string) {
 }
 
 func git(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = withoutGitEnv(os.Environ())
+	// Hooks off: they come from the worktree, which the agent just edited, and
+	// would run its code with the runner's privileges.
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir, "-c", "core.hooksPath=/dev/null"}, args...)...)
+	cmd.Env = childEnv(os.Environ())
 	var out, errOut bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errOut
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("git %s: %v: %s", args[0], err, strings.TrimSpace(errOut.String()))
 	}
 	return strings.TrimSpace(out.String()), nil
-}
-
-// withoutGitEnv drops GIT_DIR, GIT_INDEX_FILE and friends. Inherited from a
-// git hook or an IDE they would point every command at some other repository.
-func withoutGitEnv(env []string) []string {
-	out := make([]string, 0, len(env))
-	for _, kv := range env {
-		if !strings.HasPrefix(kv, "GIT_") {
-			out = append(out, kv)
-		}
-	}
-	return out
 }
 
 func branchName(issueKey string) (string, error) {
@@ -383,17 +400,16 @@ func splitSubject(text string) (subject, rest string) {
 	return firstLine(value, 60), strings.TrimSpace(after)
 }
 
+// firstLine trims s to one line of at most n bytes, without splitting a rune.
 func firstLine(s string, n int) string {
-	s, _, _ = strings.Cut(strings.TrimSpace(s), "\n")
 	s = strings.TrimRight(strings.TrimSpace(s), ".")
-	if len(s) > n {
-		cut := n
-		for cut > 0 && (s[cut]&0xC0) == 0x80 {
-			cut--
-		}
-		s = s[:cut] + "…"
+	if len(s) <= n {
+		return s
 	}
-	return s
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n] + "…"
 }
 
 func nonNil(s []string) []string {

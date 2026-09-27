@@ -145,7 +145,10 @@ func TestClaudeCodeRunsFenced(t *testing.T) {
 	for name, want := range map[string]string{
 		"--output-format":   "stream-json",
 		"--permission-mode": "acceptEdits",
-		"--setting-sources": "project",
+		// No settings files: neither the owner's nor the repo's own, which
+		// the base branch controls.
+		"--setting-sources": "",
+		"--settings":        `{"disableAllHooks":true}`,
 		"--max-turns":       "60",
 	} {
 		if got, _ := flag(name); got != want {
