@@ -185,7 +185,8 @@ func relPaths(s, root string) string {
 	if root == "" {
 		return s
 	}
-	return strings.ReplaceAll(s, strings.TrimSuffix(root, "/")+"/", "")
+	root = strings.TrimSuffix(root, "/")
+	return strings.ReplaceAll(strings.ReplaceAll(s, root+"/", ""), root, ".")
 }
 
 // clip cuts s to maxDetail bytes without splitting a rune.
