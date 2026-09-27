@@ -21,6 +21,7 @@ import (
 	"cortex/internal/auth"
 	"cortex/internal/store"
 	"cortex/internal/tools"
+	"cortex/internal/tools/claudecode"
 )
 
 // The approval endpoints: the human half of the write gate.
@@ -241,8 +242,13 @@ func (s *Server) approveInTx(
 		row.Status, "", &userID, row.DecidedAt.Time, payloadEdited(row)); err != nil {
 		return store.AgentAction{}, err
 	}
-	if err := s.deps.Enqueuer.EnqueueExecuteWrite(ctx, tx, actionID); err != nil {
-		return store.AgentAction{}, err
+	// A delegation runs on its owner's machine, whose runner polls for
+	// approved rows; a job here would be picked up by a server with no way to
+	// perform it.
+	if row.Action != claudecode.ActionDelegate {
+		if err := s.deps.Enqueuer.EnqueueExecuteWrite(ctx, tx, actionID); err != nil {
+			return store.AgentAction{}, err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return store.AgentAction{}, fmt.Errorf("commit transaction: %w", err)

@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 
 	"cortex/internal/store"
+	"cortex/internal/tools"
 )
 
 // The approval-gate events written from outside the loop.
@@ -76,5 +77,27 @@ func RecordActionFailed(
 		ActionID: actionID,
 		Action:   action,
 		Error:    errText,
+	})
+}
+
+// delegateProgressPayload is the payload of EventDelegateProgress.
+type delegateProgressPayload struct {
+	ActionID uuid.UUID `json:"action_id"`
+	Action   string    `json:"action"`
+	tools.Step
+}
+
+// RecordDelegateProgress appends one step of an executing delegation.
+func RecordDelegateProgress(
+	ctx context.Context,
+	q store.Querier,
+	runID, actionID uuid.UUID,
+	action string,
+	step tools.Step,
+) error {
+	return appendEvent(ctx, q, runID, EventDelegateProgress, delegateProgressPayload{
+		ActionID: actionID,
+		Action:   action,
+		Step:     step,
 	})
 }

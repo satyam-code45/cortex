@@ -15,3 +15,7 @@ ON CONFLICT (email) DO UPDATE
         name       = EXCLUDED.name,
         avatar_url = EXCLUDED.avatar_url
 RETURNING *;
+
+-- name: GetUserByEmail :one
+-- The Claude Code runner acts for one account, named by email in its config.
+SELECT * FROM users WHERE email = $1;

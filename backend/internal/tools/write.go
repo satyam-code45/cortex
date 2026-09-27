@@ -88,3 +88,27 @@ type Writer interface {
 	// which may differ from what the agent proposed.
 	Execute(ctx context.Context, payload json.RawMessage) (WriteOutcome, error)
 }
+
+// Step is one unit of progress from a long-running write, e.g. one tool call
+// made by a Claude Code delegation.
+type Step struct {
+	// ID is unique within the write; ParentID names the step this one ran
+	// inside (a subagent's calls sit under the call that launched it).
+	ID       string `json:"id"`
+	ParentID string `json:"parent_id,omitempty"`
+	// Kind is "tool_use", "tool_result" or "text".
+	Kind   string `json:"kind"`
+	Tool   string `json:"tool,omitempty"`
+	Detail string `json:"detail,omitempty"`
+	// Truncated says Detail was cut to fit.
+	Truncated bool `json:"truncated,omitempty"`
+	IsError   bool `json:"is_error,omitempty"`
+}
+
+// ProgressWriter is a Writer whose work takes long enough to be worth
+// watching. The execution job type-asserts for it; every other Writer is
+// unchanged.
+type ProgressWriter interface {
+	Writer
+	ExecuteWithProgress(ctx context.Context, payload json.RawMessage, emit func(Step)) (WriteOutcome, error)
+}

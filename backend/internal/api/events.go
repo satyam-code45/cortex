@@ -118,6 +118,17 @@ func (s *Server) handleRunEvents(w http.ResponseWriter, r *http.Request) {
 	// back when it returns.
 	runSettled := run.Status == "completed" || run.Status == "failed" ||
 		run.Status == agent.RunStatusAwaitingApproval
+	if run.Status == agent.RunStatusAwaitingApproval {
+		// Except while an approved action is executing: a delegation streams
+		// its progress for minutes, and that is worth holding a stream for.
+		inFlight, err := q.CountInFlightActionsByRun(r.Context(), runID)
+		if err != nil {
+			logger.Error("events: failed to count in-flight actions", "run_id", runID, "error", err)
+			writeError(w, logger, http.StatusInternalServerError, "internal error")
+			return
+		}
+		runSettled = inFlight == 0
+	}
 
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream")

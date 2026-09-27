@@ -11,6 +11,7 @@ import (
 	"cortex/internal/agent"
 	"cortex/internal/auth"
 	"cortex/internal/tools"
+	"cortex/internal/tools/claudecode"
 	"cortex/internal/tools/gmail"
 	"cortex/internal/tools/jira"
 	"cortex/internal/tools/notion"
@@ -58,6 +59,10 @@ type RegistryBuilderConfig struct {
 	// the send tool so an out-of-policy recipient is refused at proposal time,
 	// where it is a correctable observation rather than a wasted approval.
 	GmailSendAllowedDomains []string
+
+	// RunnerRepos reports the repos of the user's online Claude Code runner.
+	// Nil turns delegation off; so does a user with no runner online.
+	RunnerRepos func(ctx context.Context, userID uuid.UUID) ([]string, error)
 
 	Logger *slog.Logger
 }
@@ -137,6 +142,16 @@ func (b *RegistryBuilder) ForUser(ctx context.Context, userID uuid.UUID) (*tools
 		}
 		toolset = append(toolset, clients.tools()...)
 		connected = append(connected, info.Source)
+	}
+
+	if len(connected) > 0 && b.cfg.RunnerRepos != nil {
+		repos, err := b.cfg.RunnerRepos(ctx, userID)
+		if err != nil {
+			return nil, agent.Sources{}, fmt.Errorf("look up claude code runner: %w", err)
+		}
+		if len(repos) > 0 {
+			toolset = append(toolset, claudecode.NewDelegateTool(repos))
+		}
 	}
 
 	// ListUserConnections orders by source, so connected is already sorted.

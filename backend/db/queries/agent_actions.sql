@@ -185,3 +185,20 @@ LIMIT $2;
 UPDATE user_connections
 SET writes_enabled = $3, updated_at = now()
 WHERE user_id = $1 AND source = $2;
+
+-- name: ListAgentActionIDsForUserByActionAndStatus :many
+-- The Claude Code runner's work list: its owner's delegations in one status,
+-- oldest first. The claim that follows is still the concurrency guard.
+SELECT id FROM agent_actions
+WHERE user_id = $1
+  AND action = $2
+  AND status = $3
+ORDER BY decided_at NULLS LAST, id;
+
+-- name: CountInFlightActionsByRun :one
+-- Actions a person has approved that have not settled yet. A paused run with
+-- one of these is still producing events (a delegation's progress), so its
+-- event stream stays open.
+SELECT count(*) FROM agent_actions
+WHERE agent_run_id = $1
+  AND status IN ('approved', 'executing');

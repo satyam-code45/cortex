@@ -26,6 +26,7 @@ import (
 	"cortex/internal/keys"
 	"cortex/internal/llm"
 	"cortex/internal/rag"
+	"cortex/internal/store"
 	"cortex/internal/tools"
 	"cortex/internal/tools/gmail"
 	"cortex/internal/tools/jira"
@@ -343,6 +344,7 @@ func build(ctx context.Context, pool *pgxpool.Pool, cfg *config.Config, logger *
 			GoogleClientID:          cfg.GoogleOAuthClientID,
 			GoogleClientSecret:      cfg.GoogleOAuthClientSecret,
 			GmailSendAllowedDomains: cfg.GmailSendAllowedDomains,
+			RunnerRepos:             connections.OnlineRunnerRepos(store.New(pool)),
 			Logger:                  logger,
 		})
 		if err != nil {

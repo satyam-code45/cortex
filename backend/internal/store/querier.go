@@ -63,6 +63,10 @@ type Querier interface {
 	// sqlc.arg(since) is a timestamp rather than a hardcoded interval so tests can
 	// pin the window, matching the run limit's query.
 	CountExecutedActionsSince(ctx context.Context, arg CountExecutedActionsSinceParams) (int64, error)
+	// Actions a person has approved that have not settled yet. A paused run with
+	// one of these is still producing events (a delegation's progress), so its
+	// event stream stays open.
+	CountInFlightActionsByRun(ctx context.Context, agentRunID uuid.UUID) (int64, error)
 	// How many of the run's actions have not reached a terminal state.
 	//
 	// 'approved' and 'executing' count alongside 'pending', and that is the whole
@@ -79,6 +83,7 @@ type Querier interface {
 	CreateConversation(ctx context.Context, arg CreateConversationParams) (Conversation, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (Session, error)
 	DeleteChunksByDocument(ctx context.Context, documentID uuid.UUID) error
+	DeleteCodeRunner(ctx context.Context, arg DeleteCodeRunnerParams) error
 	// Opportunistic housekeeping, called on login; there is no background sweeper.
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
 	DeleteSessionByTokenHash(ctx context.Context, tokenHash []byte) (int64, error)
@@ -122,10 +127,15 @@ type Querier interface {
 	GetConversation(ctx context.Context, arg GetConversationParams) (Conversation, error)
 	GetDocumentByID(ctx context.Context, id uuid.UUID) (Document, error)
 	GetDocumentBySourceExternalID(ctx context.Context, arg GetDocumentBySourceExternalIDParams) (Document, error)
+	// The freshest runner seen since $2. Several runners per user are not
+	// supported; if two exist the most recent one wins.
+	GetOnlineCodeRunnerForUser(ctx context.Context, arg GetOnlineCodeRunnerForUserParams) (CodeRunner, error)
 	// The middleware's single lookup: session validity and the user in one query.
 	// Expiry is enforced here, not in Go, so a revoked-or-expired session and an
 	// unknown token are indistinguishable to the caller (both are no-rows).
 	GetSessionUserByTokenHash(ctx context.Context, tokenHash []byte) (GetSessionUserByTokenHashRow, error)
+	// The Claude Code runner acts for one account, named by email in its config.
+	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserConnection(ctx context.Context, arg GetUserConnectionParams) (UserConnection, error)
 	GetUserDemoWorkspace(ctx context.Context, id uuid.UUID) (bool, error)
 	GetUserLLMKey(ctx context.Context, userID uuid.UUID) (UserLlmKey, error)
@@ -165,6 +175,9 @@ type Querier interface {
 	// it already recorded, and guessing would collide with the unique
 	// (agent_run_id, seq) constraint.
 	InsertToolCall(ctx context.Context, arg InsertToolCallParams) (ToolCall, error)
+	// The Claude Code runner's work list: its owner's delegations in one status,
+	// oldest first. The claim that follows is still the concurrency guard.
+	ListAgentActionIDsForUserByActionAndStatus(ctx context.Context, arg ListAgentActionIDsForUserByActionAndStatusParams) ([]uuid.UUID, error)
 	ListAgentActionsByRun(ctx context.Context, agentRunID uuid.UUID) ([]AgentAction, error)
 	// The audit view: every action across every run, newest first.
 	ListAgentActionsForUser(ctx context.Context, arg ListAgentActionsForUserParams) ([]AgentAction, error)
@@ -261,6 +274,7 @@ type Querier interface {
 	StartAgentRun(ctx context.Context, id uuid.UUID) (AgentRun, error)
 	TouchConversation(ctx context.Context, id uuid.UUID) error
 	TouchSession(ctx context.Context, id uuid.UUID) error
+	UpsertCodeRunnerHeartbeat(ctx context.Context, arg UpsertCodeRunnerHeartbeatParams) (CodeRunner, error)
 	// Called only for documents whose content_hash actually changed (the indexer
 	// short-circuits before this on an unchanged hash), so the update branch always
 	// has work to do.

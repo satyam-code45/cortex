@@ -154,6 +154,22 @@ func (q *Queries) CountExecutedActionsSince(ctx context.Context, arg CountExecut
 	return count, err
 }
 
+const countInFlightActionsByRun = `-- name: CountInFlightActionsByRun :one
+SELECT count(*) FROM agent_actions
+WHERE agent_run_id = $1
+  AND status IN ('approved', 'executing')
+`
+
+// Actions a person has approved that have not settled yet. A paused run with
+// one of these is still producing events (a delegation's progress), so its
+// event stream stays open.
+func (q *Queries) CountInFlightActionsByRun(ctx context.Context, agentRunID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countInFlightActionsByRun, agentRunID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countUnsettledActionsByRun = `-- name: CountUnsettledActionsByRun :one
 SELECT count(*) FROM agent_actions
 WHERE agent_run_id = $1
@@ -481,6 +497,42 @@ func (q *Queries) InsertAgentAction(ctx context.Context, arg InsertAgentActionPa
 		&i.DecidedBy,
 	)
 	return i, err
+}
+
+const listAgentActionIDsForUserByActionAndStatus = `-- name: ListAgentActionIDsForUserByActionAndStatus :many
+SELECT id FROM agent_actions
+WHERE user_id = $1
+  AND action = $2
+  AND status = $3
+ORDER BY decided_at NULLS LAST, id
+`
+
+type ListAgentActionIDsForUserByActionAndStatusParams struct {
+	UserID uuid.UUID `json:"user_id"`
+	Action string    `json:"action"`
+	Status string    `json:"status"`
+}
+
+// The Claude Code runner's work list: its owner's delegations in one status,
+// oldest first. The claim that follows is still the concurrency guard.
+func (q *Queries) ListAgentActionIDsForUserByActionAndStatus(ctx context.Context, arg ListAgentActionIDsForUserByActionAndStatusParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listAgentActionIDsForUserByActionAndStatus, arg.UserID, arg.Action, arg.Status)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAgentActionsByRun = `-- name: ListAgentActionsByRun :many

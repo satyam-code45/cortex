@@ -9,6 +9,26 @@ import (
 	"context"
 )
 
+const getUserByEmail = `-- name: GetUserByEmail :one
+SELECT id, email, created_at, name, avatar_url, google_sub, use_demo_workspace FROM users WHERE email = $1
+`
+
+// The Claude Code runner acts for one account, named by email in its config.
+func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByEmail, email)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.CreatedAt,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.GoogleSub,
+		&i.UseDemoWorkspace,
+	)
+	return i, err
+}
+
 const upsertGoogleUser = `-- name: UpsertGoogleUser :one
 INSERT INTO users (email, google_sub, name, avatar_url)
 VALUES ($1, $2, $3, $4)

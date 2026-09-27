@@ -53,6 +53,16 @@ type Citation struct {
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
+type CodeRunner struct {
+	ID            uuid.UUID          `json:"id"`
+	UserID        uuid.UUID          `json:"user_id"`
+	Name          string             `json:"name"`
+	Repos         []string           `json:"repos"`
+	ClaudeVersion *string            `json:"claude_version"`
+	LastSeenAt    pgtype.Timestamptz `json:"last_seen_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type Conversation struct {
 	ID        uuid.UUID          `json:"id"`
 	UserID    uuid.UUID          `json:"user_id"`

@@ -69,9 +69,15 @@ func NewExecuteWriteWorker(
 // the agent on resume, and shown in the audit view. Retrying it would risk
 // sending something twice to fix a problem that a person needs to see.
 func (w *ExecuteWriteWorker) Work(ctx context.Context, job *river.Job[ExecuteWriteArgs]) error {
-	actionID := job.Args.ActionID
 	w.logger.Info("write execution job started",
-		"action_id", actionID, "job_id", job.ID, "attempt", job.Attempt)
+		"action_id", job.Args.ActionID, "job_id", job.ID, "attempt", job.Attempt)
+	return w.Perform(ctx, job.Args.ActionID, job.Attempt)
+}
+
+// Perform is Work without River: the Claude Code runner polls for its actions
+// instead of working a queue, and calls this directly. attempt > 1 means an
+// earlier attempt may have died mid-write.
+func (w *ExecuteWriteWorker) Perform(ctx context.Context, actionID uuid.UUID, attempt int) error {
 
 	// The owner and the writer are resolved BEFORE the row is claimed, and the
 	// order is the whole point. Claiming first means a transient credential
@@ -100,7 +106,7 @@ func (w *ExecuteWriteWorker) Work(ctx context.Context, job *river.Job[ExecuteWri
 		return fmt.Errorf("build writers for user %s: %w", *owner, err)
 	}
 
-	claimed, err := w.claim(ctx, actionID, job.Attempt)
+	claimed, err := w.claim(ctx, actionID, attempt)
 	if err != nil {
 		return err
 	}
@@ -123,7 +129,13 @@ func (w *ExecuteWriteWorker) Work(ctx context.Context, job *river.Job[ExecuteWri
 		payload = claimed.ProposedPayload
 	}
 
-	outcome, execErr := writer.Execute(ctx, payload)
+	var outcome tools.WriteOutcome
+	var execErr error
+	if pw, ok := writer.(tools.ProgressWriter); ok {
+		outcome, execErr = pw.ExecuteWithProgress(ctx, payload, w.progressSink(ctx, claimed))
+	} else {
+		outcome, execErr = writer.Execute(ctx, payload)
+	}
 	if execErr != nil {
 		w.logger.Error("write execution failed",
 			"action_id", actionID, "action", claimed.Action, "error", execErr)
@@ -132,6 +144,20 @@ func (w *ExecuteWriteWorker) Work(ctx context.Context, job *river.Job[ExecuteWri
 
 	w.logger.Info("write executed", "action_id", actionID, "action", claimed.Action)
 	return w.settle(ctx, claimed, &outcome, nil)
+}
+
+// progressSink appends each step as a delegate_progress event. A step that
+// cannot be recorded is logged and dropped: losing a trace line must never
+// fail a write that is already under way.
+func (w *ExecuteWriteWorker) progressSink(ctx context.Context, row *store.AgentAction) func(tools.Step) {
+	return func(step tools.Step) {
+		err := w.inTx(ctx, func(_ pgx.Tx, q store.Querier) error {
+			return agent.RecordDelegateProgress(ctx, q, row.AgentRunID, row.ID, row.Action, step)
+		})
+		if err != nil {
+			w.logger.Warn("dropped a progress step", "action_id", row.ID, "error", err)
+		}
+	}
 }
 
 // actionOwner reads the action's owner without claiming the row.

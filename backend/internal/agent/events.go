@@ -80,6 +80,10 @@ const (
 	// EventRunResumed records the loop picking back up after every proposal was
 	// decided, and carries the decisions being fed back to the model.
 	EventRunResumed = "run_resumed"
+	// EventDelegateProgress records one step of a Claude Code delegation while
+	// it executes. Its own type so replay and trace totals never mistake those
+	// steps for the agent's own tool calls.
+	EventDelegateProgress = "delegate_progress"
 )
 
 // LLM call purposes recorded on llm_calls.purpose and in llm_call events.
