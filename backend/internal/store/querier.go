@@ -94,6 +94,7 @@ type Querier interface {
 	// executing -> failed. Terminal: the row is not returned to 'approved' for
 	// another attempt, because a failed write may or may not have landed upstream
 	// and re-sending on a guess is the one outcome worse than reporting the failure.
+	// result is usually NULL; a delegation that fails still records its details.
 	FailAgentAction(ctx context.Context, arg FailAgentActionParams) (AgentAction, error)
 	FailAgentRun(ctx context.Context, arg FailAgentRunParams) (AgentRun, error)
 	// executing -> failed, for a write whose worker died mid-attempt.
@@ -274,6 +275,10 @@ type Querier interface {
 	StartAgentRun(ctx context.Context, id uuid.UUID) (AgentRun, error)
 	TouchConversation(ctx context.Context, id uuid.UUID) error
 	TouchSession(ctx context.Context, id uuid.UUID) error
+	// One runner per account. Session-scoped, so it is held for as long as the
+	// runner's connection lives and released by Postgres if the process dies —
+	// which is what makes the startup sweep of 'executing' rows safe.
+	TryLockCodeRunner(ctx context.Context, userID uuid.UUID) (bool, error)
 	UpsertCodeRunnerHeartbeat(ctx context.Context, arg UpsertCodeRunnerHeartbeatParams) (CodeRunner, error)
 	// Called only for documents whose content_hash actually changed (the indexer
 	// short-circuits before this on an unchanged hash), so the update branch always

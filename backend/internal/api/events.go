@@ -121,13 +121,13 @@ func (s *Server) handleRunEvents(w http.ResponseWriter, r *http.Request) {
 	if run.Status == agent.RunStatusAwaitingApproval {
 		// Except while an approved action is executing: a delegation streams
 		// its progress for minutes, and that is worth holding a stream for.
-		inFlight, err := q.CountInFlightActionsByRun(r.Context(), runID)
+		busy, err := actionsInFlight(r.Context(), q, runID)
 		if err != nil {
 			logger.Error("events: failed to count in-flight actions", "run_id", runID, "error", err)
 			writeError(w, logger, http.StatusInternalServerError, "internal error")
 			return
 		}
-		runSettled = inFlight == 0
+		runSettled = !busy
 	}
 
 	h := w.Header()
@@ -168,10 +168,18 @@ func (s *Server) handleRunEvents(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			lastSeq = event.Seq
-			if event.Type == agent.EventRunFinished || event.Type == agent.EventRunFailed ||
-				event.Type == agent.EventRunPaused {
+			if event.Type == agent.EventRunFinished || event.Type == agent.EventRunFailed {
 				flusher.Flush()
 				return
+			}
+			if event.Type == agent.EventRunPaused {
+				// A pause ends the stream unless something approved is still
+				// running — then its progress and outcome follow the pause.
+				busy, err := actionsInFlight(ctx, q, runID)
+				if err != nil || !busy {
+					flusher.Flush()
+					return
+				}
 			}
 		}
 		if len(events) > 0 {
@@ -193,6 +201,13 @@ func (s *Server) handleRunEvents(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+// actionsInFlight reports whether the run has an approved action that has not
+// settled yet.
+func actionsInFlight(ctx context.Context, q store.Querier, runID uuid.UUID) (bool, error) {
+	n, err := q.CountInFlightActionsByRun(ctx, runID)
+	return n > 0, err
 }
 
 // lastEventID reads the seq the client saw last, from the Last-Event-ID header

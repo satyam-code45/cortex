@@ -15,7 +15,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"cortex/internal/tools"
@@ -30,6 +29,9 @@ type Repo struct {
 	Tools []string `json:"tools,omitempty"`
 	Allow []string `json:"allow,omitempty"`
 }
+
+// errTimeout marks a delegation stopped by WriterConfig.Timeout.
+var errTimeout = errors.New("claude_code: timed out")
 
 // DefaultTools can read and edit files and launch subagents, nothing else.
 var DefaultTools = []string{"Read", "Edit", "Write", "Glob", "Grep", "Task"}
@@ -139,7 +141,8 @@ func (w *Writer) ExecuteWithProgress(ctx context.Context, raw json.RawMessage, e
 		"total_cost_usd": res.TotalCostUSD,
 		"subagents":      nonNil(res.Subagents),
 	}
-	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+	// Generous: the repo's own pre-commit hook may run its whole test suite.
+	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Minute)
 	defer cancel()
 	changed, err := w.commit(commitCtx, dir, p, res, detail)
 	if err != nil {
@@ -148,11 +151,18 @@ func (w *Writer) ExecuteWithProgress(ctx context.Context, raw json.RawMessage, e
 	}
 
 	if runErr != nil {
+		// Returned with the error so cost, session and outcome survive a failure.
+		detail["outcome"] = "error"
+		if errors.Is(runErr, errTimeout) {
+			detail["outcome"] = "timeout"
+		}
+		failed := tools.WriteOutcome{Detail: detail}
 		if changed {
-			return tools.WriteOutcome{}, fmt.Errorf("%w (partial work committed on %s)", runErr, branch)
+			return failed, fmt.Errorf("%w (partial work committed on %s)", runErr, branch)
 		}
 		w.discard(commitCtx, repo.Path, dir, branch)
-		return tools.WriteOutcome{}, runErr
+		delete(detail, "branch")
+		return failed, runErr
 	}
 
 	switch {
@@ -173,7 +183,7 @@ func (w *Writer) ExecuteWithProgress(ctx context.Context, raw json.RawMessage, e
 		delete(detail, "branch")
 	}
 
-	summary := strings.TrimSpace(res.Text)
+	_, summary := splitSubject(res.Text)
 	if summary == "" {
 		summary = "Claude Code finished without a summary."
 	}
@@ -191,10 +201,7 @@ func (w *Writer) run(ctx context.Context, dir string, repo Repo, p Payload, bran
 	cmd.Stdin = strings.NewReader(p.Prompt)
 	var stderr tailBuffer
 	cmd.Stderr = &stderr
-	// Own process group, so a timeout also stops the subprocesses Claude
-	// Code started.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	killProcessGroup(cmd)
 	cmd.WaitDelay = 10 * time.Second
 
 	stdout, err := cmd.StdoutPipe()
@@ -209,7 +216,7 @@ func (w *Writer) run(ctx context.Context, dir string, repo Repo, p Payload, bran
 
 	switch {
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		return res, fmt.Errorf("claude_code: timed out after %s", w.cfg.Timeout)
+		return res, fmt.Errorf("%w after %s", errTimeout, w.cfg.Timeout)
 	case errors.Is(ctx.Err(), context.Canceled):
 		return res, errors.New("claude_code: the runner was stopped before Claude Code finished")
 	case !res.Seen:
@@ -246,9 +253,10 @@ func (w *Writer) args(repo Repo, p Payload, branch string) []string {
 		"--max-budget-usd", strconv.FormatFloat(w.cfg.MaxBudgetUSD, 'f', 2, 64),
 		"--append-system-prompt", fmt.Sprintf(
 			"You are working on Jira issue %s in a git worktree on branch %s. Do not run git commit, "+
-				"push or checkout: the runner commits your changes when you finish. End with a short "+
-				"summary: what you changed and why, what you ran to check it and the result, and "+
-				"anything left unresolved.", p.IssueKey, branch),
+				"push or checkout: the runner commits your changes when you finish. Start your final "+
+				"message with one line of the form \"Subject: <what changed, under 60 characters>\", "+
+				"then a short summary: what you changed and why, what you ran to check it and the "+
+				"result, and anything left unresolved.", p.IssueKey, branch),
 	}
 	if len(repo.Allow) > 0 {
 		args = append(args, "--allowedTools", strings.Join(repo.Allow, ","))
@@ -290,9 +298,10 @@ func (w *Writer) commit(ctx context.Context, dir string, p Payload, res runResul
 	detail["files_changed"] = strings.Split(names, "\n")
 	detail["diffstat"] = stat
 
-	subject := p.IssueKey + ": " + firstLine(res.Text, 60)
-	if strings.TrimSpace(res.Text) == "" {
-		subject = p.IssueKey + ": changes from Claude Code"
+	// Not the product's name: some repos' commit-msg hooks refuse it.
+	subject := p.IssueKey + ": delegated change"
+	if s, _ := splitSubject(res.Text); s != "" {
+		subject = p.IssueKey + ": " + s
 	}
 	if _, err := git(ctx, dir, "commit", "-q", "-m", subject, "-m", "Delegated from Cortex."); err != nil {
 		return true, fmt.Errorf("commit: %w", err)
@@ -314,6 +323,7 @@ func (w *Writer) discard(ctx context.Context, repoPath, dir, branch string) {
 
 func git(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = withoutGitEnv(os.Environ())
 	var out, errOut bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errOut
 	if err := cmd.Run(); err != nil {
@@ -322,12 +332,25 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 	return strings.TrimSpace(out.String()), nil
 }
 
+// withoutGitEnv drops GIT_DIR, GIT_INDEX_FILE and friends. Inherited from a
+// git hook or an IDE they would point every command at some other repository.
+func withoutGitEnv(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, "GIT_") {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
 func branchName(issueKey string) (string, error) {
 	var b [3]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", fmt.Errorf("claude_code: branch suffix: %w", err)
 	}
-	return "cortex/" + strings.ToLower(issueKey) + "-" + hex.EncodeToString(b[:]), nil
+	// The key as written: refs are case-sensitive, and PAY-142 is what people search for.
+	return "cortex/" + issueKey + "-" + hex.EncodeToString(b[:]), nil
 }
 
 // childEnvKeys is everything Claude Code inherits. Database URLs, Cortex
@@ -346,6 +369,18 @@ func childEnv(env []string) []string {
 		}
 	}
 	return out
+}
+
+// splitSubject separates the "Subject: ..." line Claude Code was asked to
+// lead with from the rest of its summary. No such line → no subject.
+func splitSubject(text string) (subject, rest string) {
+	text = strings.TrimSpace(text)
+	first, after, _ := strings.Cut(text, "\n")
+	value, ok := strings.CutPrefix(strings.TrimSpace(first), "Subject:")
+	if !ok {
+		return "", text
+	}
+	return firstLine(value, 60), strings.TrimSpace(after)
 }
 
 func firstLine(s string, n int) string {

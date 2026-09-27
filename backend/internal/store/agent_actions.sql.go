@@ -229,6 +229,7 @@ const failAgentAction = `-- name: FailAgentAction :one
 UPDATE agent_actions
 SET status      = 'failed',
     error       = $2,
+    result      = $3,
     executed_at = now()
 WHERE id = $1
   AND status = 'executing'
@@ -236,15 +237,17 @@ RETURNING id, agent_run_id, user_id, source, action, proposed_payload, final_pay
 `
 
 type FailAgentActionParams struct {
-	ID    uuid.UUID `json:"id"`
-	Error *string   `json:"error"`
+	ID     uuid.UUID `json:"id"`
+	Error  *string   `json:"error"`
+	Result []byte    `json:"result"`
 }
 
 // executing -> failed. Terminal: the row is not returned to 'approved' for
 // another attempt, because a failed write may or may not have landed upstream
 // and re-sending on a guess is the one outcome worse than reporting the failure.
+// result is usually NULL; a delegation that fails still records its details.
 func (q *Queries) FailAgentAction(ctx context.Context, arg FailAgentActionParams) (AgentAction, error) {
-	row := q.db.QueryRow(ctx, failAgentAction, arg.ID, arg.Error)
+	row := q.db.QueryRow(ctx, failAgentAction, arg.ID, arg.Error, arg.Result)
 	var i AgentAction
 	err := row.Scan(
 		&i.ID,

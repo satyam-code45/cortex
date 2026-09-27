@@ -56,6 +56,20 @@ func (q *Queries) GetOnlineCodeRunnerForUser(ctx context.Context, arg GetOnlineC
 	return i, err
 }
 
+const tryLockCodeRunner = `-- name: TryLockCodeRunner :one
+SELECT pg_try_advisory_lock(hashtextextended('cortex.code_runner:' || $1::uuid::text, 0))
+`
+
+// One runner per account. Session-scoped, so it is held for as long as the
+// runner's connection lives and released by Postgres if the process dies —
+// which is what makes the startup sweep of 'executing' rows safe.
+func (q *Queries) TryLockCodeRunner(ctx context.Context, userID uuid.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, tryLockCodeRunner, userID)
+	var pg_try_advisory_lock bool
+	err := row.Scan(&pg_try_advisory_lock)
+	return pg_try_advisory_lock, err
+}
+
 const upsertCodeRunnerHeartbeat = `-- name: UpsertCodeRunnerHeartbeat :one
 INSERT INTO code_runners (user_id, name, repos, claude_version, last_seen_at)
 VALUES ($1, $2, $3, $4, now())

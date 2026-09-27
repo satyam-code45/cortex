@@ -40,7 +40,7 @@ func main() {
 }
 
 func run(logger *slog.Logger) error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 
 	cfg, err := loadConfig()
@@ -65,6 +65,20 @@ func run(logger *slog.Logger) error {
 	}
 	if err != nil {
 		return fmt.Errorf("look up %s: %w", cfg.userEmail, err)
+	}
+
+	// Held on its own connection for the life of the process.
+	lockConn, err := pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire lock connection: %w", err)
+	}
+	defer lockConn.Release()
+	locked, err := store.New(lockConn).TryLockCodeRunner(ctx, user.ID)
+	if err != nil {
+		return fmt.Errorf("take the runner lock: %w", err)
+	}
+	if !locked {
+		return fmt.Errorf("another runner is already running for %s; stop it first", cfg.userEmail)
 	}
 
 	// Insert-only: never started, so it never joins River's leader election.

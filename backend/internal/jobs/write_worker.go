@@ -139,7 +139,12 @@ func (w *ExecuteWriteWorker) Perform(ctx context.Context, actionID uuid.UUID, at
 	if execErr != nil {
 		w.logger.Error("write execution failed",
 			"action_id", actionID, "action", claimed.Action, "error", execErr)
-		return w.settle(ctx, claimed, nil, execErr)
+		// A writer may describe a failure too (a delegation's cost, session,
+		// outcome); keep that alongside the error.
+		if outcome.Detail == nil {
+			return w.settle(ctx, claimed, nil, execErr)
+		}
+		return w.settle(ctx, claimed, &outcome, execErr)
 	}
 
 	w.logger.Info("write executed", "action_id", actionID, "action", claimed.Action)
@@ -292,9 +297,18 @@ func (w *ExecuteWriteWorker) settle(
 	return w.inTx(persistCtx, func(tx pgx.Tx, q store.Querier) error {
 		if execErr != nil {
 			message := execErr.Error()
+			var detail []byte
+			if outcome != nil {
+				encoded, err := json.Marshal(resultRecord{Summary: outcome.Summary, Detail: outcome.Detail})
+				if err != nil {
+					return fmt.Errorf("encode action result: %w", err)
+				}
+				detail = encoded
+			}
 			failed, err := q.FailAgentAction(persistCtx, store.FailAgentActionParams{
-				ID:    row.ID,
-				Error: strPtr(message),
+				ID:     row.ID,
+				Error:  strPtr(message),
+				Result: detail,
 			})
 			if err != nil {
 				if errors.Is(err, pgx.ErrNoRows) {

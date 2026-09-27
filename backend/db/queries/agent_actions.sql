@@ -85,9 +85,11 @@ RETURNING *;
 -- executing -> failed. Terminal: the row is not returned to 'approved' for
 -- another attempt, because a failed write may or may not have landed upstream
 -- and re-sending on a guess is the one outcome worse than reporting the failure.
+-- result is usually NULL; a delegation that fails still records its details.
 UPDATE agent_actions
 SET status      = 'failed',
     error       = $2,
+    result      = sqlc.narg(result),
     executed_at = now()
 WHERE id = $1
   AND status = 'executing'

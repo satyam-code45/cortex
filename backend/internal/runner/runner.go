@@ -139,10 +139,10 @@ func (r *Runner) Heartbeat(ctx context.Context) error {
 	return nil
 }
 
-// RecoverInterrupted settles delegations a previous run of this process left
-// in 'executing'. Attempt 2 is what routes them through the worker's
-// "interrupted, never re-run" branch.
-// ponytail: assumes one runner per user; several would need a claimed_by column.
+// RecoverInterrupted settles delegations a previous runner left in
+// 'executing'. Attempt 2 routes them through the worker's "interrupted, never
+// re-run" branch. Only safe because cmd/runner holds a per-account advisory
+// lock: no other live runner can be working on them.
 func (r *Runner) RecoverInterrupted(ctx context.Context) error {
 	return r.performAll(ctx, actions.StatusExecuting, 2)
 }

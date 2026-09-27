@@ -18,3 +18,9 @@ LIMIT 1;
 
 -- name: DeleteCodeRunner :exec
 DELETE FROM code_runners WHERE user_id = $1 AND name = $2;
+
+-- name: TryLockCodeRunner :one
+-- One runner per account. Session-scoped, so it is held for as long as the
+-- runner's connection lives and released by Postgres if the process dies —
+-- which is what makes the startup sweep of 'executing' rows safe.
+SELECT pg_try_advisory_lock(hashtextextended('cortex.code_runner:' || sqlc.arg(user_id)::uuid::text, 0));
